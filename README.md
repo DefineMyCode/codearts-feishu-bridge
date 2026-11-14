@@ -86,22 +86,50 @@ INFO 桥接已启动 | 工作目录=/root/your-project | 事件=im.message.recei
 
 `lark-cli` 事件流断开时会自动指数退避重连（1s → 30s 上限）。
 
-生产环境可用 systemd 托管：
+生产环境用 systemd 托管（本机已按此配置，服务名 `codearts-feishu-bridge`）：
 
 ```ini
 [Unit]
 Description=CodeArts Feishu Bridge
 After=network-online.target
+Wants=network-online.target
 
 [Service]
+Type=simple
+User=root
 WorkingDirectory=/root/codearts-feishu-bridge
-ExecStart=/usr/bin/node --env-file=.env src/index.js
+Environment=HOME=/root
+Environment=PATH=/root/.codeartsdoer/installers:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/node --env-file=/root/codearts-feishu-bridge/.env /root/codearts-feishu-bridge/src/index.js
 Restart=always
 RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+安装与开机自启：
+
+```bash
+sudo cp codearts-feishu-bridge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now codearts-feishu-bridge
+```
+
+日常管理：
+
+```bash
+systemctl status codearts-feishu-bridge
+journalctl -u codearts-feishu-bridge -f          # 跟踪日志
+sudo systemctl restart codearts-feishu-bridge
+sudo systemctl disable --now codearts-feishu-bridge
+```
+
+> `HOME=/root` 与 `PATH` 必须设置：`lark-cli` 需要从 `~/.larksuite*` 读应用配置，`codearts` 安装在 `~/.codeartsdoer/installers` 下，systemd 默认环境里都找不到。
 
 ## 四、使用
 
