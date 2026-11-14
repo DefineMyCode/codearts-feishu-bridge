@@ -33,8 +33,14 @@ export function parseEventLine(line) {
   return { sessionID, chunk, error };
 }
 
-export function buildArgs({ prompt, sessionId, model, agent } = {}) {
-  const args = ["run", "--format", "json", "--auto_approval"];
+const APPROVAL_FLAGS = {
+  auto: "--auto_approval",
+  manual: "--manual_approval",
+  full: "--full_access",
+};
+
+export function buildArgs({ prompt, sessionId, model, agent, approvalMode = "auto" } = {}) {
+  const args = ["run", "--format", "json", APPROVAL_FLAGS[approvalMode] || APPROVAL_FLAGS.auto];
   if (sessionId) args.push("--session", sessionId);
   if (model) args.push("--model", model);
   if (agent) args.push("--agent", agent);
@@ -48,13 +54,14 @@ export function runCodearts({
   sessionId = "",
   model = "",
   agent = "",
+  approvalMode = "auto",
   timeoutMs = 600000,
   signal,
   spawnImpl = defaultSpawn,
   env = process.env,
 } = {}) {
   return new Promise((resolve) => {
-    const args = buildArgs({ prompt, sessionId, model, agent });
+    const args = buildArgs({ prompt, sessionId, model, agent, approvalMode });
     const child = spawnImpl(bin, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     child.stdin.on?.("error", () => {});
 

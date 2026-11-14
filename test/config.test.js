@@ -22,6 +22,23 @@ test("非法 REPLY_FORMAT 直接报错", () => {
   assert.throws(() => loadConfig({ ...base, REPLY_FORMAT: "cardx" }), /REPLY_FORMAT/);
 });
 
+test("审批模式默认 auto 并支持别名", () => {
+  assert.equal(loadConfig(base).approvalMode, "auto");
+  assert.equal(loadConfig({ ...base, CODEARTS_APPROVAL_MODE: "manual" }).approvalMode, "manual");
+  assert.equal(loadConfig({ ...base, CODEARTS_APPROVAL_MODE: "full_access" }).approvalMode, "full");
+  assert.equal(
+    loadConfig({ ...base, CODEARTS_APPROVAL_MODE: "AUTO_APPROVAL" }).approvalMode,
+    "auto",
+  );
+});
+
+test("非法审批模式直接报错", () => {
+  assert.throws(
+    () => loadConfig({ ...base, CODEARTS_APPROVAL_MODE: "yolo" }),
+    /CODEARTS_APPROVAL_MODE/,
+  );
+});
+
 test("缺少 CODEARTS_WORKDIR 时报错", () => {
   assert.throws(() => loadConfig({}), /CODEARTS_WORKDIR/);
 });

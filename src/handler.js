@@ -101,6 +101,7 @@ export function createMessageHandler({ config, sessions, queue, lark, logger, ru
           sessionId: sessions.get(message.chatId),
           model: config.model,
           agent: config.agent,
+          approvalMode: config.approvalMode,
           timeoutMs: config.timeoutMs,
           signal: controller.signal,
         });

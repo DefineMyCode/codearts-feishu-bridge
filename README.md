@@ -8,7 +8,7 @@
 飞书消息
   → lark-cli event consume im.message.receive_v1（官方 CLI 的 WebSocket 长连接）
   → 本进程：去重 / 白名单 / 命令解析 / 按会话串行排队
-  → codearts run --format json --auto_approval（prompt 走 stdin，--session 续上下文）
+  → codearts run --format json --auto_approval（默认模式，可用 CODEARTS_APPROVAL_MODE 切换；prompt 走 stdin，--session 续上下文）
   → lark-cli im +messages-reply（回到原消息）
 ```
 
@@ -66,6 +66,7 @@ cp .env.example .env
 | `CODEARTS_MAX_CONCURRENCY` | 否 | 全局同时执行的任务数，默认 2 |
 | `ALLOWED_CHAT_IDS` | 否 | 逗号分隔的会话白名单（`oc_` 开头），强烈建议在生产环境配置 |
 | `CODEARTS_MODEL` / `CODEARTS_AGENT` | 否 | 指定模型或智能体，留空用默认 |
+| `CODEARTS_APPROVAL_MODE` | 否 | 审批模式：`auto`（默认，沙箱 + AI 自动审批）、`manual`（沙箱 + 人工审批，IM 场景会一直等待）、`full`（跳过沙箱与全部检查）；也接受 `auto_approval`/`manual_approval`/`full_access` |
 | `REPLY_FORMAT` | 否 | 回复格式：`card`（默认，interactive 卡片，标题/表格/代码块结构化渲染）、`post`（飞书富文本 markdown）、`text`（纯文本）；发送失败会自动降级 |
 | `REPLY_CHUNK_SIZE` / `REPLY_MAX_CHUNKS` | 否 | 长结果分段大小与段数，默认 1800 / 4 |
 | `BRIDGE_ACK` | 否 | 是否先回“已收到，开始执行…”，默认 true |
@@ -147,8 +148,9 @@ sudo systemctl disable --now codearts-feishu-bridge
 
 ## 五、安全边界
 
-- 固定使用 `--auto_approval`：沙箱内执行、高风险操作拦截、重要操作由 AI 自动审批。
-- **不要**改成 `--full_access`：那会跳过全部安全检查，IM 一旦被拉群就是远程命令执行。
+- 默认 `CODEARTS_APPROVAL_MODE=auto`：沙箱内执行、高风险操作拦截、重要操作由 AI 自动审批。
+- 可改为 `manual`（沙箱内但需人工审批，IM 场景无人点会一直等待，不建议）或 `full`（跳过沙箱与全部安全检查）。
+- **`full` 等于把本机命令执行权限交给任何能给机器人发消息的人**：只在临时联调时开启，并同时配置 `ALLOWED_CHAT_IDS`；桥接启动时会打印显式 WARN。
 - 任务只在 `CODEARTS_WORKDIR` 内执行，IM 消息里的路径不会改变工作目录。
 - 生产环境请同时配置 `ALLOWED_CHAT_IDS`，避免机器人被拉进任意群后被人滥用消耗额度。
 - `.env` 含凭证信息时不要提交到仓库。

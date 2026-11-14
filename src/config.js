@@ -11,6 +11,7 @@ function bool(value, fallback) {
 }
 
 const REPLY_FORMATS = ["card", "post", "text"];
+const APPROVAL_MODES = ["auto", "manual", "full"];
 
 export function loadConfig(env = process.env) {
   if (!env.CODEARTS_WORKDIR) {
@@ -20,6 +21,13 @@ export function loadConfig(env = process.env) {
   const replyFormat = (env.REPLY_FORMAT || "card").toLowerCase();
   if (!REPLY_FORMATS.includes(replyFormat)) {
     throw new Error('REPLY_FORMAT 只能是 "card"、"post" 或 "text"');
+  }
+
+  const approvalAliases = { auto_approval: "auto", manual_approval: "manual", full_access: "full" };
+  const rawApproval = (env.CODEARTS_APPROVAL_MODE || "auto").toLowerCase();
+  const approvalMode = approvalAliases[rawApproval] || rawApproval;
+  if (!APPROVAL_MODES.includes(approvalMode)) {
+    throw new Error('CODEARTS_APPROVAL_MODE 只能是 "auto"、"manual" 或 "full"');
   }
 
   return {
@@ -32,6 +40,7 @@ export function loadConfig(env = process.env) {
     workdir: path.resolve(env.CODEARTS_WORKDIR),
     model: env.CODEARTS_MODEL || "",
     agent: env.CODEARTS_AGENT || "",
+    approvalMode,
     timeoutMs: int(env.CODEARTS_TIMEOUT_MS, 600000),
     maxConcurrency: int(env.CODEARTS_MAX_CONCURRENCY, 2),
     allowedChatIds: (env.ALLOWED_CHAT_IDS || "")

@@ -54,6 +54,19 @@ test("构造参数包含非交互与 JSON 输出", () => {
     "--agent",
     "a",
   ]);
+  assert.deepEqual(buildArgs({ approvalMode: "manual" }), [
+    "run",
+    "--format",
+    "json",
+    "--manual_approval",
+  ]);
+  assert.deepEqual(buildArgs({ approvalMode: "full" }), ["run", "--format", "json", "--full_access"]);
+  assert.deepEqual(buildArgs({ approvalMode: "unknown" }), [
+    "run",
+    "--format",
+    "json",
+    "--auto_approval",
+  ]);
 });
 
 test("运行并汇总多个文本事件", async () => {

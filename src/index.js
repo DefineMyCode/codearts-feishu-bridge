@@ -57,8 +57,12 @@ const consumer = lark.startConsuming({
   onFatal: (detail) => logger.error("事件流持续重连失败，请检查 lark-cli 配置:", detail),
 });
 
+if (config.approvalMode === "full") {
+  logger.warn("已启用 full_access：任务将跳过沙箱与全部安全检查，请务必配置 ALLOWED_CHAT_IDS");
+}
+
 logger.info(
-  `桥接已启动 | 工作目录=${config.workdir} | 事件=${config.eventKey} | 并发=${config.maxConcurrency}`,
+  `桥接已启动 | 工作目录=${config.workdir} | 事件=${config.eventKey} | 并发=${config.maxConcurrency} | 审批=${config.approvalMode}`,
 );
 
 let stopping = false;
