@@ -12,7 +12,7 @@
   → lark-cli im +messages-reply（回到原消息）
 ```
 
-依赖只有本机已有的两个命令行工具：`lark-cli`（飞书官方 CLI）与 `codearts`（码道 CLI）。Node.js ≥ 20，不用 `npm install`。
+依赖两个命令行工具：`lark-cli`（飞书官方 CLI）与 `codearts`（码道 CLI）。Node.js ≥ 20，不用 `npm install`。
 
 ## 一、准备
 
@@ -43,7 +43,7 @@ lark-cli event schema im.message.receive_v1
 ### 2. 码道侧
 
 ```bash
-codearts --version          # 本机已验证 26.11.1
+codearts --version          # 确认版本
 codearts run "只回复：OK"   # 确认已登录且有可用套餐
 ```
 
@@ -66,7 +66,7 @@ cp .env.example .env
 | `CODEARTS_MAX_CONCURRENCY` | 否 | 全局同时执行的任务数，默认 2 |
 | `ALLOWED_CHAT_IDS` | 否 | 逗号分隔的会话白名单（`oc_` 开头），强烈建议在生产环境配置 |
 | `CODEARTS_MODEL` / `CODEARTS_AGENT` | 否 | 指定模型或智能体，留空用默认 |
-| `REPLY_FORMAT` | 否 | 回复格式：`card`（默认，interactive 卡片，代码块/表格可渲染）、`post`（飞书富文本 markdown）、`text`（纯文本）；发送失败会自动降级 |
+| `REPLY_FORMAT` | 否 | 回复格式：`card`（默认，interactive 卡片，标题/表格/代码块结构化渲染）、`post`（飞书富文本 markdown）、`text`（纯文本）；发送失败会自动降级 |
 | `REPLY_CHUNK_SIZE` / `REPLY_MAX_CHUNKS` | 否 | 长结果分段大小与段数，默认 1800 / 4 |
 | `BRIDGE_ACK` | 否 | 是否先回“已收到，开始执行…”，默认 true |
 | `STATE_FILE` | 否 | 会话映射持久化位置，默认 `./data/sessions.json` |
@@ -81,12 +81,12 @@ node --env-file=.env src/index.js
 
 ```
 INFO lark-cli 1.0.84 就绪
-INFO 桥接已启动 | 工作目录=/root/your-project | 事件=im.message.receive_v1 | 并发=2
+INFO 桥接已启动 | 工作目录=/path/to/your-project | 事件=im.message.receive_v1 | 并发=2
 ```
 
 `lark-cli` 事件流断开时会自动指数退避重连（1s → 30s 上限）。
 
-生产环境用 systemd 托管（本机已按此配置，服务名 `codearts-feishu-bridge`）：
+生产环境可用 systemd 托管（示例服务名 `codearts-feishu-bridge`，下列路径请按实际环境替换）：
 
 ```ini
 [Unit]
@@ -96,12 +96,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/codearts-feishu-bridge
-Environment=HOME=/root
-Environment=PATH=/root/.codeartsdoer/installers:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-EnvironmentFile=/root/.config/codearts-cli.env
-ExecStart=/usr/bin/node --env-file=/root/codearts-feishu-bridge/.env /root/codearts-feishu-bridge/src/index.js
+User=your-user
+WorkingDirectory=/path/to/codearts-feishu-bridge
+Environment=HOME=/home/your-user
+Environment=PATH=/home/your-user/.codeartsdoer/installers:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/home/your-user/.config/codearts-cli.env
+ExecStart=/usr/bin/node --env-file=/path/to/codearts-feishu-bridge/.env /path/to/codearts-feishu-bridge/src/index.js
 Restart=always
 RestartSec=5
 KillMode=mixed
@@ -130,9 +130,9 @@ sudo systemctl restart codearts-feishu-bridge
 sudo systemctl disable --now codearts-feishu-bridge
 ```
 
-> `HOME=/root` 与 `PATH` 必须设置：`lark-cli` 需要从 `~/.larksuite*` 读应用配置，`codearts` 安装在 `~/.codeartsdoer/installers` 下，systemd 默认环境里都找不到。
+> `HOME` 与 `PATH` 必须设置：`lark-cli` 需要从 `~/.larksuite*` 读应用配置，`codearts` 安装在 `~/.codeartsdoer/installers` 下，systemd 默认环境里都找不到。
 >
-> `EnvironmentFile=/root/.config/codearts-cli.env` 用来提供码道的华为云认证变量（`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`）。交互 shell 里这两个变量是现成的，但 systemd 不会继承，缺了就会 “认证失败” 并导致回复 `码道退出码 0，没有输出。` 该文件请保持 `chmod 600`。
+> `EnvironmentFile` 指向提供码道华为云认证变量（`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`）的文件。交互 shell 里这两个变量是现成的，但 systemd 不会继承，缺了就会“认证失败”并导致回复 `码道退出码 0，没有输出。` 该文件请保持 `chmod 600`。
 
 ## 四、使用
 
@@ -161,7 +161,7 @@ sudo systemctl disable --now codearts-feishu-bridge
 | `事件流退出 code=5` 且错误为 `context canceled` | 事件流子进程的 stdin 被立即关闭（旧版用 `ignore`），`lark-cli` 无界运行遇 EOF 会自行取消。当前版本已把 stdin 保持为打开管道，拉最新代码重启即可 |
 | 群里 @ 了但没反应 | 检查应用是否开启 `im.message.receive_v1`、机器人是否在群内、`BOT_NAME` 是否与飞书显示名一致 |
 | 回复“码道返回错误：无法连接到模型服务” | 码道侧网络/代理或套餐问题，先在终端直接 `codearts run` 验证 |
-| 回复“码道退出码 0，没有输出” | 多半是认证失败：systemd 没继承 `CODEARTS_CLI_AK`/`CODEARTS_CLI_SK`。把它们写进 `/root/.config/codearts-cli.env` 并在 unit 里加 `EnvironmentFile=`，再 `systemctl restart` |
+| 回复“码道退出码 0，没有输出” | 多半是认证失败：systemd 没继承 `CODEARTS_CLI_AK`/`CODEARTS_CLI_SK`。把它们写进 `~/.config/codearts-cli.env` 并在 unit 里加 `EnvironmentFile=`，再 `systemctl restart` |
 | 回复“启动 codearts 失败” | `CODEARTS_BIN` 指向错误或未安装 |
 | 任务一直不结束 | 用 `/stop` 终止；检查 `CODEARTS_TIMEOUT_MS` |
 
@@ -172,16 +172,16 @@ npm test                 # 单元测试
 ./scripts/e2e-smoke.sh   # 端到端冒烟：假 lark-cli + 假 codearts，验证整条链路
 ```
 
-单元测试覆盖：消息归一化与 @ 判定、命令解析、去重、会话串行与并发上限、会话持久化、码道 JSON 事件解析/中止/超时/EPIPE、`lark-cli` 参数与 NDJSON 事件流、handler 的确认/结果/停止/异常回复路径。
+单元测试覆盖：消息归一化与 @ 判定、命令解析、去重、会话串行与并发上限、会话持久化、码道 JSON 事件解析/中止/超时/EPIPE、`lark-cli` 参数与 NDJSON 事件流、handler 的确认/结果/停止/异常回复路径，以及卡片的标题/表格/代码块结构化转换与按块分段。
 
-冒烟脚本会启动真实桥接进程，用一个假的 `lark-cli` 推一条消息事件、用一个假的 `codearts` 返回结果，然后断言“已收到”与结果两条回复都发出、会话 ID 已落盘、收到 SIGTERM 能优雅退出。当前环境实测输出 `E2E SMOKE PASS`。
+冒烟脚本会启动真实桥接进程，用一个假的 `lark-cli` 推一条消息事件、用一个假的 `codearts` 返回结果，然后断言“已收到”与结果两条回复都发出、会话 ID 已落盘、收到 SIGTERM 能优雅退出。冒烟通过时输出 `E2E SMOKE PASS`。
 
 ## 已知限制
 
 - 只处理文本消息（`message_type=text/post`），图片/文件暂不解析。
-- 回复默认走 `interactive` 卡片（`msg_type=interactive` + `markdown` 组件），代码块、表格、分割线可正常渲染；发送失败按 `card → post → text` 自动降级。
+- 回复默认走 `interactive` 卡片，由桥接把 Markdown 转成结构化元素：首个标题转为卡片 `header`，表格逐行转为 `column_set`（表头加粗、去掉 `|---|` 分隔行），代码块与分割线原样保留；发送失败按 `card → post → text` 自动降级。
+- 长回复按块分段（代码块、表格、标题、列表、段落各自成块，表格与代码块不会被空行拆散），超出 `REPLY_CHUNK_SIZE` 才按行切分；每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段，没有卡片流式更新。
 - `REPLY_FORMAT=post` 走 `lark-cli --markdown`（飞书 post 富文本），代码块与表格支持有限；`REPLY_FORMAT=text` 为纯文本。
-- 长回复按 `REPLY_CHUNK_SIZE` 分段（每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段），没有卡片流式更新。
 - 会话映射是单实例内存 + JSON 文件，不支持多进程共享。
 
 ## License

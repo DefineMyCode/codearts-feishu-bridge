@@ -64,3 +64,40 @@ test("标题与表格不被空行切碎", () => {
   assert.match(chunks[0], /^## 标题/);
   assert.match(chunks[0], /\| 命令 \| 作用 \|/);
 });
+
+test("表格作为整块合并，不会被空行拆成两段", () => {
+  const table = "| 名称 | 说明 |\n|---|---|\n| a | 1 |";
+  const text = `前言\n\n${table}`;
+  const chunks = chunkText(text, 200, 5);
+
+  assert.equal(chunks.length, 1);
+  assert.ok(chunks[0].includes(table));
+});
+
+test("表格内部空行不打断表格块", () => {
+  const table = "| a | b |\n|---|---|\n| 1 | 2 |\n\n| 3 | 4 |";
+  const chunks = chunkText(table, 500, 5);
+
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0], /\| 3 \| 4 \|/);
+});
+
+test("长表格按行切分时行序不丢失", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => `| ${i} | 值${i} |`);
+  const table = "| 序号 | 值 |\n|---|---|\n" + rows.join("\n");
+  const chunks = chunkText(table, 200, 20);
+
+  assert.ok(chunks.every((chunk) => chunk.length <= 200));
+  const joined = chunks.join("\n");
+  assert.ok(joined.includes("| 序号 | 值 |"));
+  assert.ok(joined.includes("| 39 | 值39 |"));
+});
+
+test("列表块不被拆到标题所在分段之外", () => {
+  const text = "## 用法\n\n- 第一项\n- 第二项\n- 第三项";
+  const chunks = chunkText(text, 200, 3);
+
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0], /- 第一项/);
+  assert.match(chunks[0], /- 第三项/);
+});

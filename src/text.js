@@ -4,6 +4,109 @@ function parseFence(line) {
   return { marker: match[1], lang: (match[2] || "").trim() };
 }
 
+function isHrLine(line) {
+  return /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+}
+
+function isTableLine(line) {
+  return /\|/.test(line) && line.trim().split("|").length >= 3;
+}
+
+function isHeadingLine(line) {
+  return /^\s{0,3}#{1,6}\s+/.test(line);
+}
+
+function isListLine(line) {
+  return /^\s{0,3}(?:[-*+]|\d+\.)\s+/.test(line);
+}
+
+function splitBlocks(text) {
+  const lines = text.split("\n");
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+
+    const fence = parseFence(line);
+    if (fence) {
+      const buffer = [line];
+      i += 1;
+      while (i < lines.length) {
+        buffer.push(lines[i]);
+        const closing = parseFence(lines[i]);
+        i += 1;
+        if (closing && closing.marker[0] === fence.marker[0] && !closing.lang) break;
+      }
+      blocks.push(buffer.join("\n"));
+      continue;
+    }
+
+    if (isTableLine(line)) {
+      const buffer = [line];
+      i += 1;
+      while (i < lines.length) {
+        if (isTableLine(lines[i])) {
+          buffer.push(lines[i]);
+          i += 1;
+          continue;
+        }
+        if (!lines[i].trim() && i + 1 < lines.length && isTableLine(lines[i + 1])) {
+          buffer.push("");
+          i += 1;
+          continue;
+        }
+        break;
+      }
+      blocks.push(buffer.join("\n"));
+      continue;
+    }
+
+    if (isHeadingLine(line)) {
+      blocks.push(line);
+      i += 1;
+      continue;
+    }
+
+    if (isHrLine(line)) {
+      blocks.push(line);
+      i += 1;
+      continue;
+    }
+
+    if (isListLine(line)) {
+      const buffer = [line];
+      i += 1;
+      while (i < lines.length && isListLine(lines[i])) {
+        buffer.push(lines[i]);
+        i += 1;
+      }
+      blocks.push(buffer.join("\n"));
+      continue;
+    }
+
+    const buffer = [line];
+    i += 1;
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !parseFence(lines[i]) &&
+      !isTableLine(lines[i]) &&
+      !isHeadingLine(lines[i]) &&
+      !isHrLine(lines[i]) &&
+      !isListLine(lines[i])
+    ) {
+      buffer.push(lines[i]);
+      i += 1;
+    }
+    blocks.push(buffer.join("\n"));
+  }
+  return blocks;
+}
+
 function splitLongParagraph(paragraph, size) {
   const lines = paragraph.split("\n");
   const pieces = [];
@@ -56,7 +159,7 @@ export function chunkText(text, size, maxChunks) {
   const normalized = String(text ?? "").replace(/\r\n/g, "\n").trim();
   if (!normalized) return ["（码道没有返回内容）"];
 
-  const paragraphs = normalized.split(/\n{2,}/);
+  const blocks = splitBlocks(normalized);
   const chunks = [];
   let current = "";
 
@@ -65,8 +168,8 @@ export function chunkText(text, size, maxChunks) {
     current = "";
   };
 
-  for (const paragraph of paragraphs) {
-    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+  for (const block of blocks) {
+    const candidate = current ? `${current}\n\n${block}` : block;
     if (candidate.length <= size) {
       current = candidate;
       continue;
@@ -74,12 +177,12 @@ export function chunkText(text, size, maxChunks) {
 
     flushCurrent();
 
-    if (paragraph.length <= size) {
-      current = paragraph;
+    if (block.length <= size) {
+      current = block;
       continue;
     }
 
-    for (const piece of splitLongParagraph(paragraph, size)) {
+    for (const piece of splitLongParagraph(block, size)) {
       const merged = current ? `${current}\n\n${piece}` : piece;
       if (merged.length <= size) current = merged;
       else {
