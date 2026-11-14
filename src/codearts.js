@@ -60,6 +60,7 @@ export function runCodearts({
 
     let buffer = "";
     const chunks = [];
+    const plainLines = [];
     let stderrTail = "";
     let sessionID = "";
     let errorText = "";
@@ -72,8 +73,9 @@ export function runCodearts({
       settled = true;
       clearTimeout(timer);
       if (signal) signal.removeEventListener("abort", onAbort);
+      const plain = plainLines.join("\n").trim();
       resolve({
-        text: chunks.join("").trim(),
+        text: chunks.join("").trim() || plain,
         sessionID: sessionID || sessionId,
         stderrTail: stderrTail.trim(),
         error: errorText,
@@ -85,7 +87,13 @@ export function runCodearts({
 
     const consume = (line) => {
       const parsed = parseEventLine(line);
-      if (!parsed) return;
+      if (!parsed) {
+        const plain = line.trim();
+        if (plain && !plain.startsWith("{") && plainLines.join("\n").length < 4000) {
+          plainLines.push(plain);
+        }
+        return;
+      }
       if (parsed.sessionID) sessionID = parsed.sessionID;
       if (parsed.chunk) chunks.push(parsed.chunk);
       if (parsed.error) errorText = parsed.error;

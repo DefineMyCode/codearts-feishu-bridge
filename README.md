@@ -100,6 +100,7 @@ User=root
 WorkingDirectory=/root/codearts-feishu-bridge
 Environment=HOME=/root
 Environment=PATH=/root/.codeartsdoer/installers:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/root/.config/codearts-cli.env
 ExecStart=/usr/bin/node --env-file=/root/codearts-feishu-bridge/.env /root/codearts-feishu-bridge/src/index.js
 Restart=always
 RestartSec=5
@@ -130,6 +131,8 @@ sudo systemctl disable --now codearts-feishu-bridge
 ```
 
 > `HOME=/root` 与 `PATH` 必须设置：`lark-cli` 需要从 `~/.larksuite*` 读应用配置，`codearts` 安装在 `~/.codeartsdoer/installers` 下，systemd 默认环境里都找不到。
+>
+> `EnvironmentFile=/root/.config/codearts-cli.env` 用来提供码道的华为云认证变量（`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`）。交互 shell 里这两个变量是现成的，但 systemd 不会继承，缺了就会 “认证失败” 并导致回复 `码道退出码 0，没有输出。` 该文件请保持 `chmod 600`。
 
 ## 四、使用
 
@@ -158,6 +161,7 @@ sudo systemctl disable --now codearts-feishu-bridge
 | `事件流退出 code=5` 且错误为 `context canceled` | 事件流子进程的 stdin 被立即关闭（旧版用 `ignore`），`lark-cli` 无界运行遇 EOF 会自行取消。当前版本已把 stdin 保持为打开管道，拉最新代码重启即可 |
 | 群里 @ 了但没反应 | 检查应用是否开启 `im.message.receive_v1`、机器人是否在群内、`BOT_NAME` 是否与飞书显示名一致 |
 | 回复“码道返回错误：无法连接到模型服务” | 码道侧网络/代理或套餐问题，先在终端直接 `codearts run` 验证 |
+| 回复“码道退出码 0，没有输出” | 多半是认证失败：systemd 没继承 `CODEARTS_CLI_AK`/`CODEARTS_CLI_SK`。把它们写进 `/root/.config/codearts-cli.env` 并在 unit 里加 `EnvironmentFile=`，再 `systemctl restart` |
 | 回复“启动 codearts 失败” | `CODEARTS_BIN` 指向错误或未安装 |
 | 任务一直不结束 | 用 `/stop` 终止；检查 `CODEARTS_TIMEOUT_MS` |
 

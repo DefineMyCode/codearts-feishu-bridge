@@ -113,3 +113,26 @@ test("空输出时给出退出码提示", async () => {
   const result = await runCodearts({ bin, prompt: "hi", cwd: "/tmp" });
   assert.match(summarizeResult(result), /退出码 0/);
 });
+
+test("非 JSON 输出作为兜底文本回传", async () => {
+  const bin = fakeBinary(
+    ["cat > /dev/null", "echo '│'", "echo '● 认证失败，没有设置环境变量CODEARTS_CLI_AK/CODEARTS_CLI_SK'"].join(
+      "\n",
+    ),
+  );
+  const result = await runCodearts({ bin, prompt: "hi", cwd: "/tmp" });
+  assert.match(result.text, /认证失败/);
+  assert.match(summarizeResult(result), /认证失败/);
+});
+
+test("有 JSON 文本时不回退到非 JSON 行", async () => {
+  const bin = fakeBinary(
+    [
+      "cat > /dev/null",
+      'echo \'{"type":"text","part":{"type":"text","text":"OK"}}\'',
+      "echo 'noise line'",
+    ].join("\n"),
+  );
+  const result = await runCodearts({ bin, prompt: "hi", cwd: "/tmp" });
+  assert.equal(result.text, "OK");
+});
