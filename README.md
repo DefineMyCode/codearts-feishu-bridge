@@ -1,0 +1,157 @@
+# codearts-feishu-bridge
+
+把华为云码道 CLI（`codearts`）接进飞书单聊 / 群聊的轻量桥接。**零 npm 依赖**，不需要公网地址，不需要飞书自建应用的回调 URL。
+
+## 工作原理
+
+```
+飞书消息
+  → lark-cli event consume im.message.receive_v1（官方 CLI 的 WebSocket 长连接）
+  → 本进程：去重 / 白名单 / 命令解析 / 按会话串行排队
+  → codearts run --format json --auto_approval（prompt 走 stdin，--session 续上下文）
+  → lark-cli im +messages-reply（回到原消息）
+```
+
+依赖只有本机已有的两个命令行工具：`lark-cli`（飞书官方 CLI）与 `codearts`（码道 CLI）。Node.js ≥ 20，不用 `npm install`。
+
+## 一、准备
+
+### 1. 飞书侧
+
+```bash
+# 安装飞书官方 CLI（若尚未安装）
+npm i -g @larksuite/cli
+
+# 绑定/创建应用（交互式，会输出授权链接）
+lark-cli config init --new
+
+# 登录授权（按提示在浏览器完成）
+lark-cli auth login
+
+# 确认身份与控制台事件已开启
+lark-cli whoami
+lark-cli event schema im.message.receive_v1
+```
+
+飞书开发者后台里需要：
+- 应用开启机器人能力，并把机器人拉进目标群（群聊场景）
+- 开通事件 `im.message.receive_v1`
+- 权限 `im:message.p2p_msg:readonly`，以及发送消息所需的消息权限（`im:message:send_as_bot` 或控制台自动授予的等价权限）
+
+`im.message.receive_v1` 的订阅方式选长连接（由 `lark-cli` 负责建立），不要填公网回调地址。
+
+### 2. 码道侧
+
+```bash
+codearts --version          # 本机已验证 26.11.1
+codearts run "只回复：OK"   # 确认已登录且有可用套餐
+```
+
+若返回“无法连接到模型服务”，先解决网络/代理或套餐问题，桥接会原样把错误回给你。
+
+## 二、配置
+
+```bash
+cp .env.example .env
+```
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `CODEARTS_WORKDIR` | 是 | 码道执行任务的工作目录（**所有 IM 消息都只在这个目录里执行**） |
+| `LARK_CLI_BIN` | 否 | `lark-cli` 路径，默认走 PATH |
+| `LARK_IDENTITY` | 否 | 身份类型，默认 `bot`；也可设 `user` 用你本人的身份收发 |
+| `BOT_NAME` | 建议 | 机器人在群里的显示名，用于判断群里是否 @ 了它；不填则“有提及就响应” |
+| `GROUP_REQUIRE_MENTION` | 否 | 默认 `true`，群聊必须 @ 机器人才响应 |
+| `CODEARTS_TIMEOUT_MS` | 否 | 单任务超时，默认 600000（10 分钟） |
+| `CODEARTS_MAX_CONCURRENCY` | 否 | 全局同时执行的任务数，默认 2 |
+| `ALLOWED_CHAT_IDS` | 否 | 逗号分隔的会话白名单（`oc_` 开头），强烈建议在生产环境配置 |
+| `CODEARTS_MODEL` / `CODEARTS_AGENT` | 否 | 指定模型或智能体，留空用默认 |
+| `REPLY_FORMAT` | 否 | 回复格式：`card`（默认，interactive 卡片，代码块/表格可渲染）、`post`（飞书富文本 markdown）、`text`（纯文本）；发送失败会自动降级 |
+| `REPLY_CHUNK_SIZE` / `REPLY_MAX_CHUNKS` | 否 | 长结果分段大小与段数，默认 1800 / 4 |
+| `BRIDGE_ACK` | 否 | 是否先回“已收到，开始执行…”，默认 true |
+| `STATE_FILE` | 否 | 会话映射持久化位置，默认 `./data/sessions.json` |
+
+## 三、启动
+
+```bash
+node --env-file=.env src/index.js
+```
+
+正常日志：
+
+```
+INFO lark-cli 1.0.84 就绪
+INFO 桥接已启动 | 工作目录=/root/your-project | 事件=im.message.receive_v1 | 并发=2
+```
+
+`lark-cli` 事件流断开时会自动指数退避重连（1s → 30s 上限）。
+
+生产环境可用 systemd 托管：
+
+```ini
+[Unit]
+Description=CodeArts Feishu Bridge
+After=network-online.target
+
+[Service]
+WorkingDirectory=/root/codearts-feishu-bridge
+ExecStart=/usr/bin/node --env-file=.env src/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## 四、使用
+
+- **单聊**：直接发消息，即把任务交给码道
+- **群聊**：`@机器人 你的任务`（需配置 `BOT_NAME` 才会精确匹配）
+- `/help`：帮助
+- `/new`：清掉当前会话上下文，下一条消息开新会话
+- `/stop`：终止当前任务（SIGTERM，3 秒后 SIGKILL）
+- `/status`：查看空闲/执行中、会话 ID、活跃会话数
+
+同一会话内的任务是串行的；不同会话受 `CODEARTS_MAX_CONCURRENCY` 限制。
+
+## 五、安全边界
+
+- 固定使用 `--auto_approval`：沙箱内执行、高风险操作拦截、重要操作由 AI 自动审批。
+- **不要**改成 `--full_access`：那会跳过全部安全检查，IM 一旦被拉群就是远程命令执行。
+- 任务只在 `CODEARTS_WORKDIR` 内执行，IM 消息里的路径不会改变工作目录。
+- 生产环境请同时配置 `ALLOWED_CHAT_IDS`，避免机器人被拉进任意群后被人滥用消耗额度。
+- `.env` 含凭证信息时不要提交到仓库。
+
+## 六、排障
+
+| 现象 | 处理 |
+|---|---|
+| 启动报 `not configured` / 事件收不到 | `lark-cli config init`、`lark-cli auth login`，再 `lark-cli whoami` 确认 |
+| `事件流退出 code=5` 且错误为 `context canceled` | 事件流子进程的 stdin 被立即关闭（旧版用 `ignore`），`lark-cli` 无界运行遇 EOF 会自行取消。当前版本已把 stdin 保持为打开管道，拉最新代码重启即可 |
+| 群里 @ 了但没反应 | 检查应用是否开启 `im.message.receive_v1`、机器人是否在群内、`BOT_NAME` 是否与飞书显示名一致 |
+| 回复“码道返回错误：无法连接到模型服务” | 码道侧网络/代理或套餐问题，先在终端直接 `codearts run` 验证 |
+| 回复“启动 codearts 失败” | `CODEARTS_BIN` 指向错误或未安装 |
+| 任务一直不结束 | 用 `/stop` 终止；检查 `CODEARTS_TIMEOUT_MS` |
+
+## 七、测试
+
+```bash
+npm test                 # 单元测试
+./scripts/e2e-smoke.sh   # 端到端冒烟：假 lark-cli + 假 codearts，验证整条链路
+```
+
+单元测试覆盖：消息归一化与 @ 判定、命令解析、去重、会话串行与并发上限、会话持久化、码道 JSON 事件解析/中止/超时/EPIPE、`lark-cli` 参数与 NDJSON 事件流、handler 的确认/结果/停止/异常回复路径。
+
+冒烟脚本会启动真实桥接进程，用一个假的 `lark-cli` 推一条消息事件、用一个假的 `codearts` 返回结果，然后断言“已收到”与结果两条回复都发出、会话 ID 已落盘、收到 SIGTERM 能优雅退出。当前环境实测输出 `E2E SMOKE PASS`。
+
+## 已知限制
+
+- 只处理文本消息（`message_type=text/post`），图片/文件暂不解析。
+- 回复默认走 `interactive` 卡片（`msg_type=interactive` + `markdown` 组件），代码块、表格、分割线可正常渲染；发送失败按 `card → post → text` 自动降级。
+- `REPLY_FORMAT=post` 走 `lark-cli --markdown`（飞书 post 富文本），代码块与表格支持有限；`REPLY_FORMAT=text` 为纯文本。
+- 长回复按 `REPLY_CHUNK_SIZE` 分段（每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段），没有卡片流式更新。
+- 会话映射是单实例内存 + JSON 文件，不支持多进程共享。
+
+## License
+
+[MIT](LICENSE) © 2026 Dcsgo

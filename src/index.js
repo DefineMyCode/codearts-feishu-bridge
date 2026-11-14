@@ -1,0 +1,79 @@
+import fs from "node:fs";
+import { loadConfig } from "./config.js";
+import { createLogger } from "./logger.js";
+import { LarkCli } from "./larkcli.js";
+import { SessionStore } from "./sessions.js";
+import { TaskQueue } from "./queue.js";
+import { createMessageHandler } from "./handler.js";
+import { runCodearts } from "./codearts.js";
+
+const config = loadConfig();
+const logger = createLogger({ level: config.logLevel });
+
+if (!fs.existsSync(config.workdir)) {
+  logger.error(`CODEARTS_WORKDIR 不存在：${config.workdir}`);
+  process.exit(1);
+}
+
+const sessions = new SessionStore(config.stateFile, { logger }).load();
+const queue = new TaskQueue({ maxConcurrency: config.maxConcurrency });
+const lark = new LarkCli({
+  bin: config.larkBin,
+  identity: config.larkIdentity,
+  eventKey: config.eventKey,
+  logger,
+});
+
+const version = await lark.version();
+if (!version) {
+  logger.error(`找不到 lark-cli（${config.larkBin}），请安装或设置 LARK_CLI_BIN 为绝对路径`);
+  process.exit(1);
+}
+logger.info(`lark-cli ${version} 就绪`);
+
+const status = await lark.status();
+if (!status.ok) {
+  const detail = String(status.detail || "");
+  if (detail.includes("not_configured") || detail.includes("not configured")) {
+    logger.error("lark-cli 尚未配置应用，请先执行：lark-cli config init --new && lark-cli auth login");
+    process.exit(1);
+  }
+  logger.warn(`lark-cli 身份检查失败，继续启动：${detail.slice(0, 200)}`);
+}
+
+const handle = createMessageHandler({
+  config,
+  sessions,
+  queue,
+  lark,
+  logger,
+  runCodearts,
+});
+
+const consumer = lark.startConsuming({
+  onEvent: (event) => {
+    handle(event).catch((err) => logger.error("消息处理失败", err));
+  },
+  onFatal: (detail) => logger.error("事件流持续重连失败，请检查 lark-cli 配置:", detail),
+});
+
+logger.info(
+  `桥接已启动 | 工作目录=${config.workdir} | 事件=${config.eventKey} | 并发=${config.maxConcurrency}`,
+);
+
+let stopping = false;
+function shutdown(signal) {
+  if (stopping) return;
+  stopping = true;
+  logger.info(`收到 ${signal}，正在退出`);
+  consumer.stop();
+  try {
+    sessions.save();
+  } catch (err) {
+    logger.error("保存会话状态失败", err);
+  }
+  setTimeout(() => process.exit(0), 300).unref();
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
