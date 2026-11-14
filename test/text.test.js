@@ -31,3 +31,36 @@ test("多段内容保持顺序且不丢字", () => {
   const chunks = chunkText(lines.join("\n"), 30, 10);
   assert.equal(chunks.join("\n"), lines.join("\n"));
 });
+
+test("代码块被拆分时每段围栏都闭合", () => {
+  const code = "```bash\n" + Array.from({ length: 80 }, (_, i) => `echo line-${i}`).join("\n") + "\n```";
+  const text = `前言\n\n${code}\n\n结尾`;
+  const chunks = chunkText(text, 300, 6);
+
+  for (const chunk of chunks) {
+    const fences = (chunk.match(/```/g) || []).length;
+    assert.ok(fences === 0 || fences === 2, `未闭合围栏数=${fences}: ${chunk.slice(0, 40)}`);
+  }
+  assert.ok(chunks.length >= 3);
+});
+
+test("拆分后的代码块保留语言标记", () => {
+  const code = "```python\n" + Array.from({ length: 60 }, (_, i) => `print(${i})`).join("\n") + "\n```";
+  const chunks = chunkText(`说明\n\n${code}`, 200, 6);
+  const codeChunks = chunks.filter((c) => c.includes("print("));
+
+  assert.ok(codeChunks.length >= 2);
+  for (const chunk of codeChunks) {
+    assert.match(chunk, /^```python/);
+    assert.match(chunk, /```$/);
+  }
+});
+
+test("标题与表格不被空行切碎", () => {
+  const text = "## 标题\n\n| 命令 | 作用 |\n|---|---|\n| /models | 选模型 |";
+  const chunks = chunkText(text, 200, 3);
+
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0], /^## 标题/);
+  assert.match(chunks[0], /\| 命令 \| 作用 \|/);
+});
