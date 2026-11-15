@@ -233,6 +233,63 @@ export class LarkCli {
     }
   }
 
+  async fetchMessageDetail(messageId) {
+    if (!messageId) return null;
+    const result = await this.call(
+      ["api", "GET", `/open-apis/im/v1/messages/${messageId}`, "--as", this.identity],
+      { timeoutMs: 30000 },
+    );
+    if (result.code !== 0) {
+      this.logger?.debug?.("读取消息详情失败", (result.stderr || "").slice(0, 200));
+      return null;
+    }
+    try {
+      const body = JSON.parse(result.stdout || "");
+      const item = body?.data?.items?.[0];
+      if (!item) return null;
+      return {
+        msgType: item.msg_type || "",
+        content: item.body?.content || "",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async downloadResource({ messageId, fileKey, type = "file", output, cwd } = {}) {
+    if (!messageId || !fileKey) return null;
+    const args = [
+      "im",
+      "+messages-resources-download",
+      "--message-id",
+      messageId,
+      "--file-key",
+      fileKey,
+      "--type",
+      type,
+      "--as",
+      this.identity,
+    ];
+    if (output) args.push("--output", output);
+    const result = await this.call(args, { timeoutMs: 60000, cwd });
+    if (result.code !== 0) {
+      this.logger?.warn?.("下载附件失败", (result.stderr || "").slice(0, 200));
+      return null;
+    }
+    try {
+      const body = JSON.parse(result.stdout || "");
+      const localPath = body?.data?.saved_path;
+      if (!localPath) return null;
+      return {
+        localPath,
+        sizeBytes: Number(body.data.size_bytes) || 0,
+        type,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async addReaction(messageId, emojiType) {
     if (!messageId || !emojiType) return "";
     const result = await this.call(

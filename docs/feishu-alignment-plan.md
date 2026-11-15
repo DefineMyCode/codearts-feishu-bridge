@@ -53,7 +53,7 @@
 ### P2：多类型入站（已实现）
 
 1. 已放开 image / file / audio / media；normalizeEvent 对媒体消息允许文本为空。
-2. 资源获取实测走 im +messages-mget --download-resources：事件载荷与 mget 的普通返回都不暴露 file_key，但 mget 带下载开关时会返回 resources[].local_path，文件落到 <cwd>/lark-im-resources/。因此下载根目录为 MEDIA_DIR/lark-im-resources/，不按 messageId 分子目录。
+2. 资源获取必须回查原始消息体：lark-cli 的事件输出和 mget 都会丢弃 post 消息里的 files 字段。实测一条“文字+文件”的消息，事件里只剩文字，mget 带下载开关也不返回 resources；直到 GET /open-apis/im/v1/messages/{id} 才看到 body.content 里的 files 数组。因此正确做法是回查原始消息，解析 files 与 content 里的 img/media 节点，再用 im +messages-resources-download 逐个下载到 MEDIA_DIR。机器人身份即可下载。
 3. 文本类附件（txt/md/csv/json/jsonl/log/yml/yaml）在 100 KB 与 8000 字符以内直接注入提示词；其余类型只给本地路径。
 4. 媒体消息不进入文本批处理，避免附件内容被合并进普通文本。
 

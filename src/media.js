@@ -60,3 +60,53 @@ export function composePrompt(text, resources, options = {}) {
   if (!note) return base || "请查看随消息附带的资源。";
   return base ? `${base}\n${note}` : note.trim();
 }
+
+export function extractResources(content) {
+  let body = content;
+  if (typeof content === "string") {
+    try {
+      body = JSON.parse(content);
+    } catch {
+      return [];
+    }
+  }
+  if (!body || typeof body !== "object") return [];
+
+  const found = [];
+  if (Array.isArray(body.files)) {
+    for (const item of body.files) {
+      if (item && item.file_key) {
+        found.push({ fileKey: item.file_key, fileName: item.file_name || "", type: "file" });
+      }
+    }
+  }
+  if (body.image_key) found.push({ fileKey: body.image_key, fileName: "", type: "image" });
+  if (body.file_key) {
+    found.push({ fileKey: body.file_key, fileName: body.file_name || "", type: "file" });
+  }
+  for (const key of ["content", "content_v2"]) {
+    const rows = Array.isArray(body[key]) ? body[key] : [];
+    for (const row of rows) {
+      if (!Array.isArray(row)) continue;
+      for (const element of row) {
+        if (!element || typeof element !== "object") continue;
+        if (element.tag === "img" && element.image_key) {
+          found.push({ fileKey: element.image_key, fileName: "", type: "image" });
+        }
+        if (element.tag === "media" && element.file_key) {
+          found.push({
+            fileKey: element.file_key,
+            fileName: element.file_name || "",
+            type: "file",
+          });
+        }
+      }
+    }
+  }
+
+  const unique = new Map();
+  for (const item of found) {
+    if (!unique.has(item.fileKey)) unique.set(item.fileKey, item);
+  }
+  return [...unique.values()];
+}

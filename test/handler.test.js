@@ -482,13 +482,14 @@ test("关闭进度卡片后恢复确认文本与结果消息", async () => {
   assert.equal(cards[1].card.elements[0].content, "done");
 });
 
-function makeMediaHarness({ resources = [], config = makeConfig(), runCodearts } = {}) {
+function makeMediaHarness({ detail = null, download = null, config = makeConfig(), runCodearts } = {}) {
   const prompts = [];
   const lark = {
     replyCard: async () => ({ code: 0 }),
     replyMarkdown: async () => ({ code: 0 }),
     replyText: async () => ({ code: 0 }),
-    fetchMessageResources: async () => resources,
+    fetchMessageDetail: async () => detail,
+    downloadResource: async (args) => (download ? download(args) : null),
   };
   const stateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "handler-")), "sessions.json");
   const handle = createMessageHandler({
@@ -512,7 +513,8 @@ test("媒体消息下载资源后拼进提示词", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "media-")), "note.txt");
   fs.writeFileSync(file, "文件里的内容", "utf8");
   const { handle, prompts } = makeMediaHarness({
-    resources: [{ type: "file", localPath: file, sizeBytes: 20 }],
+    detail: { msgType: "file", content: JSON.stringify({ file_key: "file_1", file_name: "note.txt" }) },
+    download: async () => ({ localPath: file, sizeBytes: 20, type: "file" }),
   });
 
   await (
@@ -524,8 +526,30 @@ test("媒体消息下载资源后拼进提示词", async () => {
   assert.match(prompts[0], /文件里的内容/);
 });
 
+test("富文本消息里的文件也会下载并注入", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "media-")), "post.txt");
+  fs.writeFileSync(file, "富文本附件内容", "utf8");
+  const { handle, prompts } = makeMediaHarness({
+    detail: {
+      msgType: "post",
+      content: JSON.stringify({
+        content: [[{ tag: "text", text: "看这个文件" }]],
+        files: [{ file_key: "file_9", file_name: "新建 文本文档.txt" }],
+      }),
+    },
+    download: async () => ({ localPath: file, sizeBytes: 30, type: "file" }),
+  });
+
+  await (
+    await handle(event({ message_type: "post", content: "看这个文件", message_id: "om_post" }))
+  ).run;
+
+  assert.match(prompts[0], /【用户附带资源】/);
+  assert.match(prompts[0], /富文本附件内容/);
+});
+
 test("资源下载为空时保留原文", async () => {
-  const { handle, prompts } = makeMediaHarness({ resources: [] });
+  const { handle, prompts } = makeMediaHarness({ detail: null });
   await (
     await handle(event({ message_type: "image", content: "", message_id: "om_img" }))
   ).run;

@@ -9,6 +9,7 @@ import {
   readTextResource,
   buildResourceNote,
   composePrompt,
+  extractResources,
 } from "../src/media.js";
 
 function tmpFile(name, content) {
@@ -83,4 +84,28 @@ test("没有原文时仅返回资源说明", () => {
 test("没有资源时返回原文或兜底提示", () => {
   assert.equal(composePrompt("原文", []), "原文");
   assert.equal(composePrompt("", []), "请查看随消息附带的资源。");
+});
+
+test("解析富文本里的文件列表", () => {
+  const resources = extractResources(
+    JSON.stringify({ files: [{ file_key: "file_1", file_name: "a.txt" }] }),
+  );
+  assert.deepEqual(resources, [{ fileKey: "file_1", fileName: "a.txt", type: "file" }]);
+});
+
+test("解析图片与媒体节点并去重", () => {
+  const resources = extractResources(
+    JSON.stringify({
+      image_key: "img_1",
+      content: [[{ tag: "img", image_key: "img_1" }, { tag: "media", file_key: "file_2" }]],
+    }),
+  );
+  assert.equal(resources.length, 2);
+  assert.deepEqual(resources.map((r) => r.fileKey), ["img_1", "file_2"]);
+});
+
+test("非法内容返回空数组", () => {
+  assert.deepEqual(extractResources("not json"), []);
+  assert.deepEqual(extractResources(null), []);
+  assert.deepEqual(extractResources({}), []);
 });

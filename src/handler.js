@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import {
   normalizeEvent,
   isAddressedToBot,
@@ -9,7 +11,7 @@ import { chunkText } from "./text.js";
 import { summarizeResult } from "./codearts.js";
 import { buildCardMarkdown, buildProgressCard } from "./card.js";
 import { extractMessageId } from "./larkcli.js";
-import { composePrompt, isMediaMessage } from "./media.js";
+import { composePrompt, extractResources, isMediaMessage } from "./media.js";
 
 const HELP_TEXT = [
   "码道飞书桥接命令：",
@@ -129,21 +131,67 @@ export function createMessageHandler({
   }
 
   async function buildPrompt(message) {
-    if (!isMediaMessage(message) || config.mediaEnabled === false) return message.text;
-    if (typeof lark.fetchMessageResources !== "function") return message.text;
-    let resources = [];
-    try {
-      resources = await lark.fetchMessageResources(message.messageId, { cwd: config.mediaDir });
-    } catch (err) {
-      logger?.warn?.("下载消息资源失败", err?.message || String(err));
-    }
+    if (config.mediaEnabled === false) return message.text;
+    if (message.messageType !== "post" && !isMediaMessage(message)) return message.text;
+    const resources = await resolveResources(message);
     if (resources.length === 0) {
-      return message.text || "用户发送了附件，但桥接未能下载到本地。";
+      if (isMediaMessage(message) && !message.text) {
+        return "用户发送了附件，但桥接未能下载到本地。";
+      }
+      return message.text;
     }
     return composePrompt(message.text, resources, {
       maxBytes: config.textInjectMaxBytes,
       maxChars: config.textInjectMaxChars,
     });
+  }
+
+  async function resolveResources(message) {
+    if (
+      typeof lark.fetchMessageDetail !== "function" ||
+      typeof lark.downloadResource !== "function"
+    ) {
+      return [];
+    }
+    let detail = null;
+    try {
+      detail = await lark.fetchMessageDetail(message.messageId);
+    } catch (err) {
+      logger?.warn?.("读取消息详情失败", err?.message || String(err));
+      return [];
+    }
+    if (!detail) return [];
+    const candidates = extractResources(detail.content);
+    if (candidates.length === 0) return [];
+
+    if (config.mediaDir) {
+      try {
+        fs.mkdirSync(config.mediaDir, { recursive: true });
+      } catch (err) {
+        logger?.warn?.("创建附件目录失败", err?.message || String(err));
+        return [];
+      }
+    }
+
+    const resources = [];
+    for (const candidate of candidates) {
+      const ext = path.extname(candidate.fileName || "");
+      const output = `${candidate.fileKey}${ext}`;
+      let saved = null;
+      try {
+        saved = await lark.downloadResource({
+          messageId: message.messageId,
+          fileKey: candidate.fileKey,
+          type: candidate.type,
+          output,
+          cwd: config.mediaDir,
+        });
+      } catch (err) {
+        logger?.warn?.("下载附件失败", err?.message || String(err));
+      }
+      if (saved) resources.push({ ...saved, fileName: candidate.fileName });
+    }
+    return resources;
   }
 
   async function markProcessing(message) {
