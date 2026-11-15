@@ -25,13 +25,13 @@ function seed(store, overrides = {}) {
 
 const baseConfig = { taskAutoRetry: true, taskMaxAttempts: 2 };
 
-test("残留执行中任务被标记中断并重投", () => {
+test("残留执行中任务被标记中断并重投", async () => {
   const store = makeStore();
   const id = seed(store);
   store.markRunning(id, 1100);
 
   const submitted = [];
-  const result = recoverTasks({
+  const result = await recoverTasks({
     store,
     config: baseConfig,
     submit: (task) => submitted.push(task),
@@ -47,7 +47,7 @@ test("残留执行中任务被标记中断并重投", () => {
   store.close();
 });
 
-test("达到尝试上限后不再重投", () => {
+test("达到尝试上限后不再重投", async () => {
   const store = makeStore();
   const id = seed(store);
   store.markRunning(id, 1100);
@@ -57,7 +57,7 @@ test("达到尝试上限后不再重投", () => {
   assert.equal(store.getTask(id).attempts, 2);
 
   const submitted = [];
-  const result = recoverTasks({
+  const result = await recoverTasks({
     store,
     config: baseConfig,
     submit: (task) => submitted.push(task),
@@ -71,13 +71,13 @@ test("达到尝试上限后不再重投", () => {
   store.close();
 });
 
-test("关闭自动重投时只标记中断", () => {
+test("关闭自动重投时只标记中断", async () => {
   const store = makeStore();
   const id = seed(store);
   store.markRunning(id, 1100);
 
   const submitted = [];
-  const result = recoverTasks({
+  const result = await recoverTasks({
     store,
     config: { taskAutoRetry: false, taskMaxAttempts: 2 },
     submit: (task) => submitted.push(task),
@@ -91,13 +91,13 @@ test("关闭自动重投时只标记中断", () => {
   store.close();
 });
 
-test("已排队的任务在启动时被重新投递", () => {
+test("已排队的任务在启动时被重新投递", async () => {
   const store = makeStore();
   const a = seed(store, { messageId: "om_a", now: 1000 });
   const b = seed(store, { messageId: "om_b", now: 2000 });
 
   const submitted = [];
-  const result = recoverTasks({
+  const result = await recoverTasks({
     store,
     config: baseConfig,
     submit: (task) => submitted.push(task),
@@ -110,6 +110,68 @@ test("已排队的任务在启动时被重新投递", () => {
     submitted.map((task) => task.id),
     [a, b],
   );
+  store.close();
+});
+
+test("不重投的任务会收到中断通知", async () => {
+  const store = makeStore();
+  const id = seed(store);
+  store.markRunning(id, 1100);
+  store.markInterrupted(id, { now: 1200 });
+
+  const notified = [];
+  const result = await recoverTasks({
+    store,
+    config: { taskAutoRetry: false, taskMaxAttempts: 2 },
+    submit: () => {},
+    notifyInterrupted: async (task, reason) => notified.push({ id: task.id, reason }),
+    now: 2000,
+  });
+
+  assert.equal(result.kept, 1);
+  assert.deepEqual(notified, [{ id, reason: "进程重启中断" }]);
+  store.close();
+});
+
+test("重投的任务不会触发中断通知", async () => {
+  const store = makeStore();
+  const id = seed(store);
+  store.markRunning(id, 1100);
+
+  const notified = [];
+  await recoverTasks({
+    store,
+    config: baseConfig,
+    submit: () => {},
+    notifyInterrupted: async (task) => notified.push(task.id),
+    now: 2000,
+  });
+
+  assert.equal(notified.length, 0);
+  store.close();
+});
+
+test("通知失败不影响恢复流程", async () => {
+  const store = makeStore();
+  const id = seed(store);
+  store.markRunning(id, 1100);
+  store.markInterrupted(id, { now: 1200 });
+
+  const warnings = [];
+  const result = await recoverTasks({
+    store,
+    config: { taskAutoRetry: false, taskMaxAttempts: 2 },
+    submit: () => {},
+    notifyInterrupted: async () => {
+      throw new Error("飞书不可用");
+    },
+    logger: { warn: (m) => warnings.push(m) },
+    now: 2000,
+  });
+
+  assert.equal(result.kept, 1);
+  assert.equal(warnings.length, 1);
+  assert.equal(store.getTask(id).status, "interrupted");
   store.close();
 });
 

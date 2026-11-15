@@ -1,4 +1,11 @@
-export function recoverTasks({ store, config, logger, submit, now = Date.now() }) {
+export async function recoverTasks({
+  store,
+  config,
+  logger,
+  submit,
+  notifyInterrupted,
+  now = Date.now(),
+}) {
   if (!store) throw new Error("recoverTasks 需要 TaskStore");
 
   const interrupted = store.markRunningAsInterrupted({
@@ -10,11 +17,23 @@ export function recoverTasks({ store, config, logger, submit, now = Date.now() }
   }
 
   let requeued = 0;
-  if (config.taskAutoRetry) {
-    for (const task of store.listByStatus("interrupted")) {
-      if (task.attempts < config.taskMaxAttempts && store.requeue(task.id) > 0) {
+  const kept = [];
+  for (const task of store.listByStatus("interrupted")) {
+    if (config.taskAutoRetry && task.attempts < config.taskMaxAttempts) {
+      if (store.requeue(task.id) > 0) {
         requeued += 1;
+        continue;
       }
+    }
+    kept.push(task);
+  }
+
+  for (const task of kept) {
+    if (typeof notifyInterrupted !== "function") continue;
+    try {
+      await notifyInterrupted(task, task.error || "进程重启中断");
+    } catch (err) {
+      logger?.warn?.(`通知中断任务失败: ${task.id}`, err?.message || String(err));
     }
   }
 
@@ -23,7 +42,7 @@ export function recoverTasks({ store, config, logger, submit, now = Date.now() }
     submit(task);
   }
 
-  return { interrupted, requeued, submitted: queued.length };
+  return { interrupted, requeued, submitted: queued.length, kept: kept.length };
 }
 
 export function taskToMessage(task) {

@@ -191,12 +191,15 @@ sudo systemctl disable --now codearts-feishu-bridge
 
 ```bash
 npm test                 # 单元测试
-./scripts/e2e-smoke.sh   # 端到端冒烟：假 lark-cli + 假 codearts，验证整条链路
+./scripts/e2e-smoke.sh     # 端到端冒烟：假 lark-cli + 假 codearts，验证整条链路
+./scripts/e2e-recovery.sh  # 两阶段恢复演练：任务执行中 kill -9，重启后断言重投并成功
 ```
 
 单元测试覆盖：消息归一化与 @ 判定、命令解析、去重、会话串行与并发上限、会话持久化、码道 JSON 事件解析/中止/超时/EPIPE、`lark-cli` 参数与 NDJSON 事件流、handler 的确认/结果/停止/异常回复路径，以及卡片的标题/表格/代码块结构化转换与按块分段。
 
 冒烟脚本会启动真实桥接进程，用一个假的 `lark-cli` 推一条消息事件、用一个假的 `codearts` 返回结果，然后断言“已收到”与结果两条回复都发出、会话 ID 已落盘、收到 SIGTERM 能优雅退出。冒烟通过时输出 `E2E SMOKE PASS`。
+
+恢复演练脚本会先启动桥接跑一个慢任务，等任务进入 running 后 kill -9，再启动一次；断言日志出现“中断=1 重投=1 投递=1”，任务最终 succeeded 且 attempts=2，通过时输出 `E2E RECOVERY PASS`。
 
 ## 已知限制
 
@@ -206,7 +209,9 @@ npm test                 # 单元测试
 - 回复默认走 `interactive` 卡片，由桥接把 Markdown 转成结构化元素：首个标题转为卡片 `header`，表格逐行转为 `column_set`（表头加粗、去掉 `|---|` 分隔行），代码块与分割线原样保留；发送失败按 `card → post → text` 自动降级。
 - 长回复按块分段（代码块、表格、标题、列表、段落各自成块，表格与代码块不会被空行拆散），超出 `REPLY_CHUNK_SIZE` 才按行切分；每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段，没有卡片流式更新。
 - `REPLY_FORMAT=post` 走 `lark-cli --markdown`（飞书 post 富文本），代码块与表格支持有限；`REPLY_FORMAT=text` 为纯文本。
-- 会话映射是单实例内存 + JSON 文件，不支持多进程共享。
+- 会话、去重与任务记录统一存在 `TASK_DB` 指向的 SQLite 里，仍只支持单实例，不支持多进程共享。
+- 重启时残留的 running 任务会被标记为中断，并按 `TASK_AUTO_RETRY` 与 `TASK_MAX_ATTEMPTS`（默认最多两次尝试）自动重投；重投是整轮重跑，不是断点续跑。
+- 不重投的中断任务会尝试更新原进度卡片为“任务已中断”，超过 25 分钟窗口或更新失败时改为发一条文本说明。
 
 ## License
 

@@ -11,6 +11,7 @@ import { runCodearts } from "./codearts.js";
 import { cleanMediaDir } from "./media.js";
 import { TaskStore } from "./taskstore.js";
 import { recoverTasks } from "./recovery.js";
+import { buildProgressCard } from "./card.js";
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel });
@@ -86,7 +87,7 @@ handle = createMessageHandler({
   store,
 });
 
-const recovery = recoverTasks({
+const recovery = await recoverTasks({
   store,
   config,
   logger,
@@ -95,6 +96,16 @@ const recovery = recoverTasks({
     if (run && typeof run.catch === "function") {
       run.catch((err) => logger.error("恢复任务执行失败", err));
     }
+  },
+  notifyInterrupted: async (task, reason) => {
+    const text = `任务已中断：${reason}。可以重新发送，或等待后续自动重试。`;
+    const stale = Date.now() - Number(task.createdAt || 0) > 25 * 60 * 1000;
+    if (task.progressMessageId && !stale) {
+      const card = buildProgressCard({ title: "任务已中断", text, template: "orange" });
+      const result = await lark.updateCard(task.progressMessageId, card);
+      if (result?.code === 0) return;
+    }
+    await lark.sendText(task.chatId, text);
   },
 });
 logger.info(
