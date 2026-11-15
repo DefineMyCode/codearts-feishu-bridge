@@ -71,6 +71,17 @@ cp .env.example .env
 | `REPLY_CHUNK_SIZE` / `REPLY_MAX_CHUNKS` | 否 | 长结果分段大小与段数，默认 1800 / 4 |
 | `BRIDGE_ACK` | 否 | 是否先回“已收到，开始执行…”，默认 true |
 | `STATE_FILE` | 否 | 会话映射持久化位置，默认 `./data/sessions.json` |
+| `GROUP_SESSIONS_PER_USER` | 否 | 群内是否按发言人隔离上下文，默认 `true`；设为 `false` 则全群共享 |
+| `ALLOWED_USER_IDS` | 否 | 逗号分隔的用户 open_id 白名单；配置后不在名单内的人会被拒绝 |
+| `GROUP_POLICY` | 否 | 群消息策略：`open`（默认）、`allowlist`、`disabled` |
+| `GROUP_RULES` | 否 | JSON，按 chat_id 覆盖策略与 @ 要求，例如 `{"oc_x":{"policy":"allowlist","allowlist":["ou_y"],"requireMention":false}}` |
+| `TEXT_BATCH_DELAY_MS` | 否 | 同一会话连续文本的合并静默期，默认 600 |
+| `TEXT_BATCH_MAX_MESSAGES` | 否 | 单批最大合并条数，默认 8 |
+| `TEXT_BATCH_MAX_CHARS` | 否 | 单批最大合并字符数，默认 4000 |
+| `BRIDGE_REACTIONS` | 否 | 是否用表情标记处理状态，默认 `true` |
+| `REACTION_PROCESSING` / `REACTION_FAILURE` | 否 | 处理中与失败用的表情类型，默认 `Typing` / `CrossMark` |
+| `DEDUP_FILE` | 否 | 去重记录落盘位置，默认 `./data/seen.json` |
+| `DEDUP_TTL_MS` / `DEDUP_MAX` | 否 | 去重有效期与容量，默认 24 小时 / 2048 条 |
 
 ## 三、启动
 
@@ -180,6 +191,7 @@ npm test                 # 单元测试
 
 ## 已知限制
 
+- 群聊默认按发言人隔离上下文（`GROUP_SESSIONS_PER_USER=true`）；从旧版本升级时，各人首次发言会继承原来的全群会话，之后独立。
 - 只处理文本消息（`message_type=text/post`），图片/文件暂不解析。
 - 回复默认走 `interactive` 卡片，由桥接把 Markdown 转成结构化元素：首个标题转为卡片 `header`，表格逐行转为 `column_set`（表头加粗、去掉 `|---|` 分隔行），代码块与分割线原样保留；发送失败按 `card → post → text` 自动降级。
 - 长回复按块分段（代码块、表格、标题、列表、段落各自成块，表格与代码块不会被空行拆散），超出 `REPLY_CHUNK_SIZE` 才按行切分；每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段，没有卡片流式更新。

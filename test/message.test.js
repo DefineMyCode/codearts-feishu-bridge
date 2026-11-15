@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   normalizeEvent,
+  normalizeSenderId,
   renderMentions,
   isAddressedToBot,
   parseCommand,
@@ -63,6 +67,15 @@ test("兼容旧字段 id", () => {
   assert.equal(message.messageId, "om_legacy");
 });
 
+test("发送者 ID 去掉身份前缀", () => {
+  assert.equal(normalizeSenderId("user:ou_1"), "ou_1");
+  assert.equal(normalizeSenderId("bot:cli_x"), "cli_x");
+  assert.equal(normalizeSenderId("ou_1"), "ou_1");
+  assert.equal(normalizeSenderId(""), "");
+  const message = normalizeEvent(p2pEvent({ sender_id: "user:ou_9" }));
+  assert.equal(message.senderId, "ou_9");
+});
+
 test("私聊消息总是响应", () => {
   const message = normalizeEvent(p2pEvent());
   assert.equal(isAddressedToBot(message, { requireMention: true }), true);
@@ -106,4 +119,35 @@ test("空键视为新消息", () => {
   const deduper = new Deduper(2);
   assert.equal(deduper.check(""), true);
   assert.equal(deduper.check(""), true);
+});
+
+test("去重记录按 TTL 过期后可再次处理", () => {
+  let now = 1000;
+  const deduper = new Deduper({ max: 10, ttlMs: 500 }, { now: () => now });
+  assert.equal(deduper.check("om_1"), true);
+  assert.equal(deduper.check("om_1"), false);
+  now += 600;
+  assert.equal(deduper.check("om_1"), true);
+});
+
+test("去重记录可持久化并在重启后生效", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dedup-")), "nested", "seen.json");
+  const first = new Deduper({ max: 10, ttlMs: 60000, file }).load();
+  assert.equal(first.check("om_1"), true);
+  first.check("om_2");
+  first.save();
+
+  const second = new Deduper({ max: 10, ttlMs: 60000, file }).load();
+  assert.equal(second.check("om_1"), false);
+  assert.equal(second.check("om_2"), false);
+  assert.equal(second.check("om_3"), true);
+});
+
+test("损坏的去重文件按空状态启动并告警", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dedup-")), "seen.json");
+  fs.writeFileSync(file, "{broken", "utf8");
+  const warnings = [];
+  const deduper = new Deduper({ max: 10, file, logger: { warn: (m) => warnings.push(m) } }).load();
+  assert.equal(deduper.check("om_1"), true);
+  assert.equal(warnings.length, 1);
 });

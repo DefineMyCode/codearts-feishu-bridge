@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { SessionStore } from "../src/sessions.js";
+import { SessionStore, buildSessionKey } from "../src/sessions.js";
 
 test("会话状态可保存并重新加载", () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sessions-")), "nested", "sessions.json");
@@ -44,4 +44,42 @@ test("空 chatId 或 sessionId 不写入", () => {
   store.set("", "ses");
   store.set("oc", "");
   assert.equal(store.size(), 0);
+});
+
+test("会话键：私聊只用 chatId", () => {
+  assert.equal(
+    buildSessionKey({ chatId: "oc_1", senderId: "ou_1", chatType: "p2p", perUser: true }),
+    "oc_1",
+  );
+});
+
+test("会话键：群聊按人隔离时拼接参与者", () => {
+  assert.equal(
+    buildSessionKey({ chatId: "oc_1", senderId: "ou_1", chatType: "group", perUser: true }),
+    "oc_1:ou_1",
+  );
+});
+
+test("会话键：关闭按人隔离时回退 chatId", () => {
+  assert.equal(
+    buildSessionKey({ chatId: "oc_1", senderId: "ou_1", chatType: "group", perUser: false }),
+    "oc_1",
+  );
+  assert.equal(
+    buildSessionKey({ chatId: "oc_1", senderId: "", chatType: "group", perUser: true }),
+    "oc_1",
+  );
+  assert.equal(buildSessionKey({}), "");
+});
+
+test("取不到新键时回退旧键", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sessions-")), "sessions.json");
+  const store = new SessionStore(file).load();
+  store.set("oc_1", "ses_legacy");
+  assert.equal(store.getWithFallback("oc_1:ou_1", "oc_1"), "ses_legacy");
+
+  store.set("oc_1:ou_1", "ses_new");
+  assert.equal(store.getWithFallback("oc_1:ou_1", "oc_1"), "ses_new");
+  assert.equal(store.getWithFallback("oc_1:ou_2", "oc_1"), "ses_legacy");
+  assert.equal(store.getWithFallback("oc_9", "oc_9"), "");
 });

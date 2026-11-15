@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 export function renderMentions(content, mentions = []) {
   let text = String(content ?? "");
   for (const mention of mentions) {
@@ -6,6 +9,13 @@ export function renderMentions(content, mentions = []) {
     text = text.split(mention.key).join(replacement);
   }
   return text.trim();
+}
+
+export function normalizeSenderId(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const idx = raw.indexOf(":");
+  return idx > 0 ? raw.slice(idx + 1).trim() : raw;
 }
 
 export function normalizeEvent(raw) {
@@ -26,7 +36,7 @@ export function normalizeEvent(raw) {
     messageId,
     text,
     mentions,
-    senderId: raw.sender_id || "",
+    senderId: normalizeSenderId(raw.sender_id || raw.sender_open_id || ""),
     threadId: raw.thread_id || "",
     rootId: raw.root_id || "",
     createTime: raw.create_time || raw.timestamp || "",
@@ -54,21 +64,74 @@ export function parseCommand(text) {
 }
 
 export class Deduper {
-  constructor(limit = 500) {
-    this.limit = limit;
-    this.seenSet = new Set();
-    this.order = [];
+  constructor(options = 500, { now = () => Date.now() } = {}) {
+    const opts = typeof options === "number" ? { max: options } : options || {};
+    this.limit = Math.max(1, Number(opts.max) || 500);
+    this.ttlMs = Math.max(0, Number(opts.ttlMs) || 0);
+    this.file = opts.file || "";
+    this.logger = opts.logger;
+    this.now = now;
+    this.entries = new Map();
+  }
+
+  load() {
+    if (!this.file) return this;
+    try {
+      const raw = fs.readFileSync(this.file, "utf8");
+      const data = JSON.parse(raw);
+      const entries = Array.isArray(data) ? data : Object.entries(data || {});
+      const list = Array.isArray(data) ? data : entries.map(([key, at]) => [key, at]);
+      for (const item of list) {
+        if (!Array.isArray(item) || item.length < 2) continue;
+        const [key, at] = item;
+        if (typeof key !== "string" || !key) continue;
+        if (this.isExpired(Number(at))) continue;
+        this.entries.set(key, Number(at));
+      }
+      this.prune();
+    } catch (err) {
+      if (err.code !== "ENOENT") this.logger?.warn?.(`去重文件无法解析，按空状态启动: ${this.file}`);
+    }
+    return this;
+  }
+
+  save() {
+    if (!this.file) return;
+    const dir = path.dirname(this.file);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    const data = [...this.entries.entries()];
+    fs.writeFileSync(tmp, JSON.stringify(data), "utf8");
+    fs.renameSync(tmp, this.file);
+  }
+
+  isExpired(at) {
+    if (!this.ttlMs) return false;
+    return this.now() - at > this.ttlMs;
+  }
+
+  prune() {
+    for (const [key, at] of this.entries) {
+      if (this.isExpired(at)) this.entries.delete(key);
+    }
+    while (this.entries.size > this.limit) {
+      const oldest = this.entries.keys().next().value;
+      this.entries.delete(oldest);
+    }
   }
 
   check(key) {
     if (!key) return true;
-    if (this.seenSet.has(key)) return false;
-    this.seenSet.add(key);
-    this.order.push(key);
-    if (this.order.length > this.limit) {
-      const old = this.order.shift();
-      this.seenSet.delete(old);
+    const at = this.entries.get(key);
+    if (at !== undefined) {
+      if (this.isExpired(at)) {
+        this.entries.delete(key);
+      } else {
+        return false;
+      }
     }
+    this.entries.set(key, this.now());
+    this.prune();
     return true;
   }
 }

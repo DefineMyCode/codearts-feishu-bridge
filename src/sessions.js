@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export function buildSessionKey({ chatId, senderId = "", chatType = "p2p", perUser = true } = {}) {
+  if (!chatId) return "";
+  if (chatType === "p2p" || !perUser || !senderId) return chatId;
+  return `${chatId}:${senderId}`;
+}
+
 export class SessionStore {
   constructor(file, { logger } = {}) {
     this.file = file;
@@ -12,8 +18,8 @@ export class SessionStore {
     try {
       const raw = fs.readFileSync(this.file, "utf8");
       const data = JSON.parse(raw);
-      for (const [chatId, sessionId] of Object.entries(data)) {
-        if (typeof sessionId === "string" && sessionId) this.map.set(chatId, sessionId);
+      for (const [key, sessionId] of Object.entries(data)) {
+        if (typeof sessionId === "string" && sessionId) this.map.set(key, sessionId);
       }
     } catch (err) {
       if (err.code !== "ENOENT") {
@@ -23,17 +29,24 @@ export class SessionStore {
     return this;
   }
 
-  get(chatId) {
-    return this.map.get(chatId) || "";
+  get(key) {
+    return this.map.get(key) || "";
   }
 
-  set(chatId, sessionId) {
-    if (!chatId || !sessionId) return;
-    this.map.set(chatId, sessionId);
+  getWithFallback(key, legacyKey = "") {
+    const value = this.get(key);
+    if (value) return value;
+    if (!legacyKey || legacyKey === key) return "";
+    return this.get(legacyKey);
   }
 
-  clear(chatId) {
-    return this.map.delete(chatId);
+  set(key, sessionId) {
+    if (!key || !sessionId) return;
+    this.map.set(key, sessionId);
+  }
+
+  clear(key) {
+    return this.map.delete(key);
   }
 
   size() {

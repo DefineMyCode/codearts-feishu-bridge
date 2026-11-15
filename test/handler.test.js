@@ -6,6 +6,7 @@ import path from "node:path";
 import { createMessageHandler } from "../src/handler.js";
 import { SessionStore } from "../src/sessions.js";
 import { TaskQueue } from "../src/queue.js";
+import { Deduper } from "../src/message.js";
 
 function makeConfig(overrides = {}) {
   return {
@@ -19,14 +20,22 @@ function makeConfig(overrides = {}) {
     replyMaxChunks: 4,
     ack: true,
     allowedChatIds: [],
+    allowedUserIds: [],
+    groupPolicy: "open",
+    groupRules: {},
+    groupSessionsPerUser: true,
+    reactions: true,
+    reactionProcessingEmoji: "Typing",
+    reactionFailureEmoji: "CrossMark",
     requireMentionInGroup: true,
     botName: "",
     ...overrides,
   };
 }
 
-function makeHarness({ config = makeConfig(), runCodearts } = {}) {
+function makeLark() {
   const replies = [];
+  const reactions = [];
   const lark = {
     replyCard: async (messageId, card) => {
       const parsed = JSON.parse(card);
@@ -46,7 +55,20 @@ function makeHarness({ config = makeConfig(), runCodearts } = {}) {
       replies.push({ messageId, text, mode: "text" });
       return { code: 0 };
     },
+    addReaction: async (messageId, emojiType) => {
+      reactions.push({ action: "add", messageId, emojiType });
+      return `rx_${messageId}`;
+    },
+    removeReaction: async (messageId, reactionId) => {
+      reactions.push({ action: "remove", messageId, reactionId });
+      return true;
+    },
   };
+  return { lark, replies, reactions };
+}
+
+function makeHarness({ config = makeConfig(), runCodearts, batcher } = {}) {
+  const { lark, replies, reactions } = makeLark();
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "handler-")), "sessions.json");
   const sessions = new SessionStore(file).load();
   const queue = new TaskQueue({ maxConcurrency: 2 });
@@ -56,10 +78,12 @@ function makeHarness({ config = makeConfig(), runCodearts } = {}) {
     sessions,
     queue,
     lark,
-    logger: { error: (...args) => errors.push(args), debug: () => {} },
+    logger: { error: (...args) => errors.push(args), warn: () => {}, debug: () => {} },
     runCodearts: runCodearts || (async () => ({ text: "done", sessionID: "ses_new", exitCode: 0 })),
+    deduper: new Deduper(500),
+    batcher,
   });
-  return { handle, replies, sessions, queue, errors };
+  return { handle, replies, reactions, sessions, queue, errors };
 }
 
 function event(overrides = {}) {
@@ -70,6 +94,7 @@ function event(overrides = {}) {
     message_id: "om_1",
     message_type: "text",
     sender_type: "user",
+    sender_id: "ou_1",
     content: "修个 bug",
     mentions: [],
     ...overrides,
@@ -104,6 +129,7 @@ test("/help 与 /status 直接回复", async () => {
   const status = await handle(event({ message_id: "om_status", content: "/status" }));
   assert.equal(status.status, "command");
   assert.match(replies[1].text, /空闲/);
+  assert.match(replies[1].text, /会话键：oc_1/);
 });
 
 test("/new 清除会话上下文", async () => {
@@ -124,6 +150,7 @@ test("白名单外会话被忽略", async () => {
   const { handle, replies } = makeHarness({ config: makeConfig({ allowedChatIds: ["oc_other"] }) });
   const result = await handle(event());
   assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "chat-not-allowed");
   assert.equal(replies.length, 0);
 });
 
@@ -277,4 +304,109 @@ test("REPLY_FORMAT=text 时不尝试卡片与 Markdown", async () => {
 
   await (await handle(event())).run;
   assert.deepEqual(modes, ["text"]);
+});
+
+test("群聊默认按发言人隔离会话", async () => {
+  const { handle, sessions } = makeHarness({
+    config: makeConfig({ requireMentionInGroup: false }),
+  });
+
+  const first = await handle(
+    event({ chat_type: "group", message_id: "om_a", sender_id: "ou_a" }),
+  );
+  await first.run;
+  const second = await handle(
+    event({ chat_type: "group", message_id: "om_b", sender_id: "ou_b" }),
+  );
+  await second.run;
+
+  assert.equal(sessions.get("oc_1:ou_a"), "ses_new");
+  assert.equal(sessions.get("oc_1:ou_b"), "ses_new");
+  assert.equal(sessions.get("oc_1"), "");
+});
+
+test("关闭按人隔离后全群共享会话", async () => {
+  const { handle, sessions } = makeHarness({
+    config: makeConfig({ requireMentionInGroup: false, groupSessionsPerUser: false }),
+  });
+  await (await handle(event({ chat_type: "group", message_id: "om_a", sender_id: "ou_a" }))).run;
+  await (await handle(event({ chat_type: "group", message_id: "om_b", sender_id: "ou_b" }))).run;
+  assert.equal(sessions.get("oc_1"), "ses_new");
+  assert.equal(sessions.get("oc_1:ou_a"), "");
+});
+
+test("用户白名单外的人被拒绝", async () => {
+  const { handle, replies } = makeHarness({
+    config: makeConfig({ allowedUserIds: ["ou_ok"] }),
+  });
+  const result = await handle(event());
+  assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "user-not-allowed");
+  assert.equal(replies.length, 0);
+});
+
+test("群策略 disabled 时忽略整群", async () => {
+  const { handle, replies } = makeHarness({
+    config: makeConfig({ groupPolicy: "disabled" }),
+  });
+  const result = await handle(event());
+  assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "group-disabled");
+  assert.equal(replies.length, 0);
+});
+
+test("群规则可放开 @ 要求并限定名单", async () => {
+  const { handle, replies } = makeHarness({
+    config: makeConfig({
+      groupRules: {
+        oc_1: { policy: "allowlist", allowlist: ["ou_a"], requireMention: false },
+      },
+    }),
+  });
+
+  const allowed = await handle(event({ chat_type: "group", sender_id: "ou_a" }));
+  assert.equal(allowed.status, "started");
+  await allowed.run;
+
+  const denied = await handle(
+    event({ chat_type: "group", message_id: "om_2", sender_id: "ou_b" }),
+  );
+  assert.equal(denied.status, "blocked");
+  assert.equal(denied.reason, "user-not-allowed");
+  assert.ok(replies.length > 0);
+});
+
+test("任务执行前后添加并清理状态表情", async () => {
+  const { handle, reactions } = makeHarness();
+  await (await handle(event())).run;
+  assert.deepEqual(reactions[0], { action: "add", messageId: "om_1", emojiType: "Typing" });
+  assert.deepEqual(reactions.at(-1), {
+    action: "remove",
+    messageId: "om_1",
+    reactionId: "rx_om_1",
+  });
+});
+
+test("关闭表情开关后不再调用表情接口", async () => {
+  const { handle, reactions } = makeHarness({ config: makeConfig({ reactions: false }) });
+  await (await handle(event())).run;
+  assert.equal(reactions.length, 0);
+});
+
+test("配置批处理器时消息进入批处理而不立即执行", async () => {
+  const batcher = { added: [], add: (key, message) => batcher.added.push({ key, message }) };
+  const { handle, replies } = makeHarness({ batcher });
+  const result = await handle(event({ sender_id: "ou_a" }));
+  assert.equal(result.status, "batched");
+  assert.equal(replies.length, 0);
+  assert.equal(batcher.added[0].key, "oc_1");
+  assert.equal(batcher.added.length, 1);
+});
+
+test("批处理后的合并消息可通过 startRun 执行", async () => {
+  const { handle, replies } = makeHarness({ config: makeConfig({ ack: false }) });
+  const run = handle.startRun(event({ message_id: "om_merged", content: "合并后的任务" }));
+  await run;
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].text, "done");
 });

@@ -4,6 +4,8 @@ import { createLogger } from "./logger.js";
 import { LarkCli } from "./larkcli.js";
 import { SessionStore } from "./sessions.js";
 import { TaskQueue } from "./queue.js";
+import { Deduper } from "./message.js";
+import { TextBatcher } from "./batching.js";
 import { createMessageHandler } from "./handler.js";
 import { runCodearts } from "./codearts.js";
 
@@ -17,6 +19,12 @@ if (!fs.existsSync(config.workdir)) {
 
 const sessions = new SessionStore(config.stateFile, { logger }).load();
 const queue = new TaskQueue({ maxConcurrency: config.maxConcurrency });
+const deduper = new Deduper({
+  max: config.dedupMax,
+  ttlMs: config.dedupTtlMs,
+  file: config.dedupFile,
+  logger,
+}).load();
 const lark = new LarkCli({
   bin: config.larkBin,
   identity: config.larkIdentity,
@@ -41,13 +49,28 @@ if (!status.ok) {
   logger.warn(`lark-cli 身份检查失败，继续启动：${detail.slice(0, 200)}`);
 }
 
-const handle = createMessageHandler({
+let handle;
+const batcher = new TextBatcher({
+  delayMs: config.textBatchDelayMs,
+  maxMessages: config.textBatchMaxMessages,
+  maxChars: config.textBatchMaxChars,
+  onFlush: (message) => {
+    const run = handle.startRun(message);
+    if (run && typeof run.catch === "function") {
+      run.catch((err) => logger.error("批处理任务执行失败", err));
+    }
+  },
+});
+
+handle = createMessageHandler({
   config,
   sessions,
   queue,
   lark,
   logger,
   runCodearts,
+  deduper,
+  batcher,
 });
 
 const consumer = lark.startConsuming({
@@ -60,6 +83,9 @@ const consumer = lark.startConsuming({
 if (config.approvalMode === "full") {
   logger.warn("已启用 full_access：任务将跳过沙箱与全部安全检查，请务必配置 ALLOWED_CHAT_IDS");
 }
+if (config.groupSessionsPerUser) {
+  logger.info("群聊会话按参与者隔离已开启（GROUP_SESSIONS_PER_USER=true）");
+}
 
 logger.info(
   `桥接已启动 | 工作目录=${config.workdir} | 事件=${config.eventKey} | 并发=${config.maxConcurrency} | 审批=${config.approvalMode}`,
@@ -71,10 +97,17 @@ function shutdown(signal) {
   stopping = true;
   logger.info(`收到 ${signal}，正在退出`);
   consumer.stop();
+  batcher.stop();
+  try {
+    batcher.flushAll();
+  } catch (err) {
+    logger.error("刷新批处理队列失败", err);
+  }
   try {
     sessions.save();
+    deduper.save();
   } catch (err) {
-    logger.error("保存会话状态失败", err);
+    logger.error("保存状态失败", err);
   }
   setTimeout(() => process.exit(0), 300).unref();
 }

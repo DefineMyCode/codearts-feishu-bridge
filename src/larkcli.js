@@ -30,6 +30,32 @@ export function buildReplyCardArgs({ messageId, card, identity = "bot" }) {
   ];
 }
 
+export function buildReactionArgs({ messageId, emojiType, identity = "bot" }) {
+  return [
+    "im",
+    "reactions",
+    "create",
+    "--message-id",
+    messageId,
+    "--data",
+    JSON.stringify({ reaction_type: { emoji_type: emojiType } }),
+    "--as",
+    identity,
+  ];
+}
+
+export function buildReactionDeleteArgs({ messageId, reactionId, identity = "bot" }) {
+  return [
+    "im",
+    "reactions",
+    "delete",
+    "--params",
+    JSON.stringify({ message_id: messageId, reaction_id: reactionId }),
+    "--as",
+    identity,
+  ];
+}
+
 export function createNdjsonDecoder(onObject, onBadLine = () => {}) {
   let buffer = "";
   return {
@@ -143,6 +169,37 @@ export class LarkCli {
 
   async sendText(chatId, text) {
     return this.call(buildSendArgs({ chatId, text, identity: this.identity }));
+  }
+
+  async addReaction(messageId, emojiType) {
+    if (!messageId || !emojiType) return "";
+    const result = await this.call(
+      buildReactionArgs({ messageId, emojiType, identity: this.identity }),
+      { timeoutMs: 30000 },
+    );
+    if (result.code !== 0) {
+      this.logger?.debug?.("添加表情失败", (result.stderr || "").slice(0, 200));
+      return "";
+    }
+    try {
+      const body = JSON.parse(result.stdout);
+      return body?.data?.reaction_id || body?.reaction_id || "";
+    } catch {
+      return "";
+    }
+  }
+
+  async removeReaction(messageId, reactionId) {
+    if (!messageId || !reactionId) return false;
+    const result = await this.call(
+      buildReactionDeleteArgs({ messageId, reactionId, identity: this.identity }),
+      { timeoutMs: 30000 },
+    );
+    if (result.code !== 0) {
+      this.logger?.debug?.("移除表情失败", (result.stderr || "").slice(0, 200));
+      return false;
+    }
+    return true;
   }
 
   startConsuming({ onEvent, onFatal } = {}) {
