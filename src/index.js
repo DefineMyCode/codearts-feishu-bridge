@@ -8,6 +8,7 @@ import { Deduper } from "./message.js";
 import { TextBatcher } from "./batching.js";
 import { createMessageHandler } from "./handler.js";
 import { runCodearts } from "./codearts.js";
+import { cleanMediaDir } from "./media.js";
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel });
@@ -93,6 +94,22 @@ const cardConsumer = cardLark.startConsuming({
   onFatal: (detail) => logger.error("卡片回调流持续重连失败:", detail),
 });
 
+const retentionMs =
+  config.mediaRetentionDays > 0 ? config.mediaRetentionDays * 24 * 60 * 60 * 1000 : 0;
+const initialClean = cleanMediaDir(config.mediaDir, { retentionMs, logger });
+if (initialClean.removed > 0) {
+  logger.info(`已清理 ${initialClean.removed} 个过期附件（保留 ${initialClean.kept} 个）`);
+}
+const mediaTimer = setInterval(() => {
+  try {
+    const result = cleanMediaDir(config.mediaDir, { retentionMs, logger });
+    if (result.removed > 0) logger.info(`已清理 ${result.removed} 个过期附件`);
+  } catch (err) {
+    logger.warn("清理附件失败", err);
+  }
+}, 24 * 60 * 60 * 1000);
+mediaTimer.unref?.();
+
 if (config.approvalMode === "full") {
   logger.warn("已启用 full_access：任务将跳过沙箱与全部安全检查，请务必配置 ALLOWED_CHAT_IDS");
 }
@@ -111,6 +128,7 @@ function shutdown(signal) {
   logger.info(`收到 ${signal}，正在退出`);
   consumer.stop();
   cardConsumer.stop();
+  clearInterval(mediaTimer);
   batcher.stop();
   try {
     batcher.flushAll();

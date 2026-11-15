@@ -80,6 +80,7 @@ cp .env.example .env
 | `TEXT_BATCH_MAX_CHARS` | 否 | 单批最大合并字符数，默认 4000 |
 | `BRIDGE_MEDIA` | 否 | 是否接收图片/文件/音频/视频并下载到本地，默认 `true` |
 | `MEDIA_DIR` | 否 | 附件下载根目录，默认 `./data/media` |
+| `MEDIA_RETENTION_DAYS` | 否 | 附件保留天数，启动与每天清理一次，默认 7；设为 0 不清理 |
 | `TEXT_INJECT_MAX_BYTES` / `TEXT_INJECT_MAX_CHARS` | 否 | 文本附件自动注入正文的大小与字符上限，默认 100 KB / 8000 字符 |
 | `BRIDGE_REACTIONS` | 否 | 是否用表情标记处理状态，默认 `true` |
 | `REACTION_PROCESSING` / `REACTION_FAILURE` | 否 | 处理中与失败用的表情类型，默认 `Typing` / `CrossMark` |
@@ -196,7 +197,8 @@ npm test                 # 单元测试
 ## 已知限制
 
 - 群聊默认按发言人隔离上下文（`GROUP_SESSIONS_PER_USER=true`）；从旧版本升级时，各人首次发言会继承原来的全群会话，之后独立。
-- 只处理文本消息（`message_type=text/post`），图片/文件暂不解析。
+- 支持文本、富文本、图片、文件、音频、视频；富文本里内嵌的文件会回查原始消息体解析后下载。
+- 附件下载到 `MEDIA_DIR`，默认保留 7 天，启动时与每天各清理一次；只清理该目录下的文件，不递归子目录。
 - 回复默认走 `interactive` 卡片，由桥接把 Markdown 转成结构化元素：首个标题转为卡片 `header`，表格逐行转为 `column_set`（表头加粗、去掉 `|---|` 分隔行），代码块与分割线原样保留；发送失败按 `card → post → text` 自动降级。
 - 长回复按块分段（代码块、表格、标题、列表、段落各自成块，表格与代码块不会被空行拆散），超出 `REPLY_CHUNK_SIZE` 才按行切分；每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段，没有卡片流式更新。
 - `REPLY_FORMAT=post` 走 `lark-cli --markdown`（飞书 post 富文本），代码块与表格支持有限；`REPLY_FORMAT=text` 为纯文本。

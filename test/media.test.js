@@ -10,6 +10,7 @@ import {
   buildResourceNote,
   composePrompt,
   extractResources,
+  cleanMediaDir,
 } from "../src/media.js";
 
 function tmpFile(name, content) {
@@ -108,4 +109,42 @@ test("非法内容返回空数组", () => {
   assert.deepEqual(extractResources("not json"), []);
   assert.deepEqual(extractResources(null), []);
   assert.deepEqual(extractResources({}), []);
+});
+
+test("清理超过保留期的附件", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "media-clean-"));
+  const oldFile = path.join(dir, "old.txt");
+  const newFile = path.join(dir, "new.txt");
+  fs.writeFileSync(oldFile, "old", "utf8");
+  fs.writeFileSync(newFile, "new", "utf8");
+  const now = Date.now();
+  const old = new Date(now - 8 * 24 * 60 * 60 * 1000);
+  fs.utimesSync(oldFile, old, old);
+
+  const result = cleanMediaDir(dir, { retentionMs: 7 * 24 * 60 * 60 * 1000, now: () => now });
+  assert.equal(result.removed, 1);
+  assert.equal(result.kept, 1);
+  assert.equal(fs.existsSync(oldFile), false);
+  assert.equal(fs.existsSync(newFile), true);
+});
+
+test("保留期为 0 时不清理", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "media-clean-"));
+  const file = path.join(dir, "a.txt");
+  fs.writeFileSync(file, "a", "utf8");
+  const result = cleanMediaDir(dir, { retentionMs: 0 });
+  assert.equal(result.removed, 0);
+  assert.equal(fs.existsSync(file), true);
+});
+
+test("目录不存在时返回零结果", () => {
+  const result = cleanMediaDir("/tmp/not-exist-media-dir-probe", { retentionMs: 1000 });
+  assert.deepEqual(result, { removed: 0, kept: 0 });
+});
+
+test("清理时跳过子目录", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "media-clean-"));
+  fs.mkdirSync(path.join(dir, "sub"));
+  const result = cleanMediaDir(dir, { retentionMs: 1, now: () => Date.now() + 10000 });
+  assert.equal(result.removed, 0);
 });

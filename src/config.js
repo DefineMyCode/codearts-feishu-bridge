@@ -5,6 +5,12 @@ function int(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function nonNegativeInt(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 function bool(value, fallback) {
   if (value === undefined || value === "") return fallback;
   return !["0", "false", "no", "off"].includes(String(value).toLowerCase());
@@ -100,6 +106,7 @@ export function loadConfig(env = process.env) {
     textBatchMaxChars: int(env.TEXT_BATCH_MAX_CHARS, 4000),
     mediaEnabled: bool(env.BRIDGE_MEDIA, true),
     mediaDir: path.resolve(env.MEDIA_DIR || "./data/media"),
+    mediaRetentionDays: nonNegativeInt(env.MEDIA_RETENTION_DAYS, 7),
     textInjectMaxBytes: int(env.TEXT_INJECT_MAX_BYTES, 102400),
     textInjectMaxChars: int(env.TEXT_INJECT_MAX_CHARS, 8000),
     reactions: bool(env.BRIDGE_REACTIONS, true),

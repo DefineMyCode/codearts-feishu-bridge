@@ -110,3 +110,37 @@ export function extractResources(content) {
   }
   return [...unique.values()];
 }
+
+export function cleanMediaDir(
+  dir,
+  { retentionMs = 7 * 24 * 60 * 60 * 1000, now = () => Date.now(), logger } = {},
+) {
+  if (!dir || !retentionMs || retentionMs <= 0) return { removed: 0, kept: 0 };
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    if (err.code !== "ENOENT") logger?.warn?.(`读取附件目录失败: ${dir}`);
+    return { removed: 0, kept: 0 };
+  }
+
+  const cutoff = now() - retentionMs;
+  let removed = 0;
+  let kept = 0;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const full = path.join(dir, entry.name);
+    try {
+      const stat = fs.statSync(full);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(full);
+        removed += 1;
+      } else {
+        kept += 1;
+      }
+    } catch {
+      // 单个文件删除失败不影响其余文件
+    }
+  }
+  return { removed, kept };
+}
