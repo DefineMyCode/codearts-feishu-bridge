@@ -190,14 +190,18 @@ interrupted ──不重投或超上限──> 保持 interrupted
 
 ## 八、配置项
 
+路径类配置一律在 .env 中写成绝对路径，不使用相对路径。原因是相对路径依附于启动目录，一旦从别处启动就会生成第二个数据库，状态对不上且排查困难。
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| TASK_DB | ./data/tasks.db | SQLite 文件位置 |
+| TASK_DB | 无，必填 | SQLite 文件的绝对路径，例如 /root/codearts-feishu-bridge/data/tasks.db；缺失或不是绝对路径时启动直接报错 |
 | TASK_AUTO_RETRY | true | 重启后是否自动重投中断任务 |
 | TASK_MAX_ATTEMPTS | 2 | 总尝试次数上限，含首次 |
 | TASK_RETENTION_DAYS | 30 | 终态任务保留天数，0 表示不清理 |
-| STATE_FILE | ./data/sessions.json | 仅作为一次性迁移来源 |
-| DEDUP_FILE | ./data/seen.json | 仅作为一次性迁移来源 |
+| STATE_FILE | ./data/sessions.json | 仅作为一次性迁移来源，建议同样写绝对路径 |
+| DEDUP_FILE | ./data/seen.json | 仅作为一次性迁移来源，建议同样写绝对路径 |
+
+实现要求：config.js 对 TASK_DB 做必填校验，未配置或传入相对路径时抛出明确错误并给出示例；代码内不内置相对路径默认值，避免出现“库在别处”的隐性问题。
 
 ## 九、迁移方案
 
