@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCardMarkdown } from "../src/card.js";
+import { buildCardMarkdown, buildProgressCard } from "../src/card.js";
 
 test("卡片是合法 JSON 且包含 markdown 元素", () => {
   const card = JSON.parse(buildCardMarkdown("**hi**"));
@@ -72,4 +72,22 @@ test("只有标题时也保留合法 elements", () => {
   const card = JSON.parse(buildCardMarkdown("# 只有标题"));
   assert.equal(card.header.title.content, "只有标题");
   assert.deepEqual(card.elements, [{ tag: "markdown", content: "" }]);
+});
+
+test("进度卡片包含标题、颜色与正文", () => {
+  const card = JSON.parse(buildProgressCard());
+  assert.equal(card.config.wide_screen_mode, true);
+  assert.equal(card.config.update_multi, true);
+  assert.equal(card.header.title.content, "任务执行中");
+  assert.equal(card.header.template, "blue");
+  assert.match(card.elements[0].content, /任务执行中/);
+});
+
+test("进度卡片支持自定义标题与颜色", () => {
+  const card = JSON.parse(
+    buildProgressCard({ title: "执行失败", text: "错误详情", template: "red" }),
+  );
+  assert.equal(card.header.title.content, "执行失败");
+  assert.equal(card.header.template, "red");
+  assert.equal(card.elements[0].content, "错误详情");
 });

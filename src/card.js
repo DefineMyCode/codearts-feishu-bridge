@@ -188,3 +188,15 @@ export function buildCardMarkdown(markdown, { wide = true } = {}) {
   if (header) card.header = header;
   return JSON.stringify(card);
 }
+
+export function buildProgressCard({
+  title = "任务执行中",
+  text = "任务执行中…（发送 /stop 可终止）",
+  template = "blue",
+} = {}) {
+  return JSON.stringify({
+    config: { wide_screen_mode: true, update_multi: true },
+    header: { title: { tag: "plain_text", content: title }, template },
+    elements: [{ tag: "markdown", content: text }],
+  });
+}

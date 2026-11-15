@@ -102,6 +102,7 @@ export function loadConfig(env = process.env) {
     reactionProcessingEmoji: env.REACTION_PROCESSING || "Typing",
     reactionFailureEmoji: env.REACTION_FAILURE || "CrossMark",
     replyFormat,
+    progressCard: bool(env.BRIDGE_PROGRESS_CARD, true),
     replyChunkSize: int(env.REPLY_CHUNK_SIZE, 1800),
     replyMaxChunks: int(env.REPLY_MAX_CHUNKS, 4),
     ack: bool(env.BRIDGE_ACK, true),

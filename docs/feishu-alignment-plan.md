@@ -44,10 +44,11 @@
 
 ### P1：交互能力
 
-1. 订阅 card.action.trigger，按钮回调走统一协议，合成 /card 命令。
-2. 审批卡片与选择题卡片复用同一按钮结构。
-3. 卡片原位更新：使用回调返回的 token 调用 interactive/v1/card/update，注意 token 30 分钟有效、最多更新 2 次。
-4. 前置实验：跑 codearts run --format json --manual_approval，确认事件流是否暴露审批请求，以及 CLI 是否等待 stdin。若无外部审批入口，本阶段只保留 auto 模式与事后审计。
+实验结论（2026-11-15 实测）：codearts 当前版本在 --manual_approval 下，无论是否分配伪终端，都不产生审批事件、也不等待 stdin；写文件、执行 shell 命令、删除目录均直接完成，事件流只有 step/tool/text。因此审批按钮与选择题卡片不可行，本阶段只保留 auto 模式与事后审计。
+
+1. 卡片原位更新已实现：任务开始时发送“执行中”卡片，完成后用 PATCH /open-apis/im/v1/messages/{message_id} 更新为结果；更新失败自动回退为普通消息。开关为 BRIDGE_PROGRESS_CARD，默认开启。
+2. 订阅 card.action.trigger 仍是后续按钮交互的前提，当前未接入。
+3. 待验证项：卡片更新 token 的有效期与更新次数上限在真实长任务下的表现。
 
 ### P2：多类型入站
 

@@ -80,6 +80,7 @@ cp .env.example .env
 | `TEXT_BATCH_MAX_CHARS` | 否 | 单批最大合并字符数，默认 4000 |
 | `BRIDGE_REACTIONS` | 否 | 是否用表情标记处理状态，默认 `true` |
 | `REACTION_PROCESSING` / `REACTION_FAILURE` | 否 | 处理中与失败用的表情类型，默认 `Typing` / `CrossMark` |
+| `BRIDGE_PROGRESS_CARD` | 否 | 是否用一张“执行中”卡片原位更新为结果，默认 `true`；更新失败自动回退为普通回复 |
 | `DEDUP_FILE` | 否 | 去重记录落盘位置，默认 `./data/seen.json` |
 | `DEDUP_TTL_MS` / `DEDUP_MAX` | 否 | 去重有效期与容量，默认 24 小时 / 2048 条 |
 

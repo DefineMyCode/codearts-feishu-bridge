@@ -56,6 +56,16 @@ export function buildReactionDeleteArgs({ messageId, reactionId, identity = "bot
   ];
 }
 
+export function extractMessageId(result) {
+  if (!result || result.code !== 0) return "";
+  try {
+    const body = JSON.parse(result.stdout || "");
+    return body?.data?.message_id || body?.message_id || "";
+  } catch {
+    return "";
+  }
+}
+
 export function createNdjsonDecoder(onObject, onBadLine = () => {}) {
   let buffer = "";
   return {
@@ -169,6 +179,22 @@ export class LarkCli {
 
   async sendText(chatId, text) {
     return this.call(buildSendArgs({ chatId, text, identity: this.identity }));
+  }
+
+  async updateCard(messageId, card) {
+    if (!messageId || !card) return { code: 1, error: "missing message id or card" };
+    return this.call(
+      [
+        "api",
+        "PATCH",
+        `/open-apis/im/v1/messages/${messageId}`,
+        "--data",
+        JSON.stringify({ content: card }),
+        "--as",
+        this.identity,
+      ],
+      { timeoutMs: 30000 },
+    );
   }
 
   async addReaction(messageId, emojiType) {

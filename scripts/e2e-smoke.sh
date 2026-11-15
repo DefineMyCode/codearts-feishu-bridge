@@ -16,6 +16,10 @@ case "$1" in
     ;;
   im)
     echo "$@" >> "$REPLY_LOG"
+    echo '{"code":0,"data":{"message_id":"om_bot_e2e"}}'
+    ;;
+  api)
+    echo "$@" >> "$REPLY_LOG"
     echo '{"code":0}'
     ;;
 esac
@@ -33,6 +37,7 @@ export LARK_CLI_BIN="$WORK/lark-cli"
 export CODEARTS_BIN="$WORK/codearts"
 export CODEARTS_WORKDIR="$ROOT"
 export STATE_FILE="$WORK/sessions.json"
+export DEDUP_FILE="$WORK/seen.json"
 export REPLY_LOG="$WORK/replies.log"
 export LOG_LEVEL=info
 

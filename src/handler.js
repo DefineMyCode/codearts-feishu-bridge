@@ -7,7 +7,8 @@ import {
 import { buildSessionKey } from "./sessions.js";
 import { chunkText } from "./text.js";
 import { summarizeResult } from "./codearts.js";
-import { buildCardMarkdown } from "./card.js";
+import { buildCardMarkdown, buildProgressCard } from "./card.js";
+import { extractMessageId } from "./larkcli.js";
 
 const HELP_TEXT = [
   "码道飞书桥接命令：",
@@ -101,12 +102,29 @@ export function createMessageHandler({
     return false;
   }
 
-  async function reply(messageId, text) {
+  async function reply(messageId, text, { progressMessageId = "" } = {}) {
     const chunks = chunkText(text, config.replyChunkSize, config.replyMaxChunks);
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i += 1) {
+      const chunk = chunks[i];
+      if (i === 0 && progressMessageId) {
+        const updated = await lark.updateCard(progressMessageId, buildCardMarkdown(chunk));
+        if (updated?.code === 0) continue;
+        logger?.warn?.(
+          "更新进度卡片失败，改为发送新消息",
+          (updated?.stderr || updated?.error || "").slice(0, 200),
+        );
+      }
       if (!(await sendOne(messageId, chunk))) return false;
     }
     return true;
+  }
+
+  function progressCardEnabled() {
+    return (
+      config.progressCard !== false &&
+      typeof lark.replyCard === "function" &&
+      typeof lark.updateCard === "function"
+    );
   }
 
   async function markProcessing(message) {
@@ -185,8 +203,13 @@ export function createMessageHandler({
 
     const run = queue.push(key, async () => {
       const reactionId = await markProcessing(message);
+      let progressMessageId = "";
       try {
-        if (config.ack) {
+        if (progressCardEnabled()) {
+          const sent = await lark.replyCard(message.messageId, buildProgressCard());
+          if (sent?.code === 0) progressMessageId = extractMessageId(sent);
+        }
+        if (!progressMessageId && config.ack) {
           await reply(message.messageId, "已收到，开始执行…（发送 /stop 可终止）");
         }
         const result = await runCodearts({
@@ -208,7 +231,7 @@ export function createMessageHandler({
         } catch (err) {
           logger?.error("保存会话状态失败", err);
         }
-        await reply(message.messageId, summarizeResult(result));
+        await reply(message.messageId, summarizeResult(result), { progressMessageId });
         if (result.error || result.spawnError) await markFailure(message);
       } catch (err) {
         await markFailure(message);

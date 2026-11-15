@@ -410,3 +410,74 @@ test("批处理后的合并消息可通过 startRun 执行", async () => {
   assert.equal(replies.length, 1);
   assert.equal(replies[0].text, "done");
 });
+
+function makeProgressHarness({ config = makeConfig(), runCodearts, updateFails = false } = {}) {
+  const events = [];
+  const lark = {
+    replyCard: async (messageId, card) => {
+      events.push({ action: "replyCard", messageId, card: JSON.parse(card) });
+      return { code: 0, stdout: JSON.stringify({ ok: true, data: { message_id: "om_bot_card" } }) };
+    },
+    updateCard: async (messageId, card) => {
+      events.push({ action: "updateCard", messageId, card: JSON.parse(card) });
+      return updateFails ? { code: 1, stderr: "patch failed" } : { code: 0 };
+    },
+    replyMarkdown: async (messageId, text) => {
+      events.push({ action: "replyMarkdown", messageId, text });
+      return { code: 0 };
+    },
+    replyText: async (messageId, text) => {
+      events.push({ action: "replyText", messageId, text });
+      return { code: 0 };
+    },
+  };
+  const stateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "handler-")), "sessions.json");
+  const handle = createMessageHandler({
+    config,
+    sessions: new SessionStore(stateFile).load(),
+    queue: new TaskQueue({ maxConcurrency: 1 }),
+    lark,
+    logger: { error: () => {}, warn: () => {}, debug: () => {} },
+    runCodearts: runCodearts || (async () => ({ text: "done", sessionID: "ses_progress" })),
+    deduper: new Deduper(500),
+  });
+  return { handle, events };
+}
+
+test("进度卡片模式：完成后原位更新同一条卡片", async () => {
+  const { handle, events } = makeProgressHarness();
+  await (await handle(event())).run;
+
+  const cards = events.filter((e) => e.action === "replyCard");
+  const updates = events.filter((e) => e.action === "updateCard");
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].card.header.title.content, "任务执行中");
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].messageId, "om_bot_card");
+  assert.equal(updates[0].card.elements[0].content, "done");
+  assert.equal(events.filter((e) => e.action === "replyMarkdown").length, 0);
+});
+
+test("进度卡片更新失败时回退为发送新消息", async () => {
+  const { handle, events } = makeProgressHarness({ updateFails: true });
+  await (await handle(event())).run;
+
+  const updates = events.filter((e) => e.action === "updateCard");
+  assert.equal(updates.length, 1);
+  const cards = events.filter((e) => e.action === "replyCard");
+  assert.equal(cards.length, 2);
+  assert.equal(cards.at(-1).card.elements[0].content, "done");
+});
+
+test("关闭进度卡片后恢复确认文本与结果消息", async () => {
+  const { handle, events } = makeProgressHarness({
+    config: makeConfig({ progressCard: false }),
+  });
+  await (await handle(event())).run;
+
+  assert.equal(events.filter((e) => e.action === "updateCard").length, 0);
+  const cards = events.filter((e) => e.action === "replyCard");
+  assert.equal(cards.length, 2);
+  assert.match(cards[0].card.elements[0].content, /已收到/);
+  assert.equal(cards[1].card.elements[0].content, "done");
+});
