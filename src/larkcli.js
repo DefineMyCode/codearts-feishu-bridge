@@ -337,6 +337,12 @@ export class LarkCli {
     return true;
   }
 
+  isUnsubscribedError(detail) {
+    const text = String(detail || "");
+    if (text.includes("requires callbacks not subscribed")) return true;
+    return text.includes("failed_precondition") && text.toLowerCase().includes("callback");
+  }
+
   startConsuming({ onEvent, onFatal } = {}) {
     this.stopped = false;
     const loop = () => {
@@ -381,6 +387,13 @@ export class LarkCli {
           this.logger?.error(
             `事件流退出 code=${code}${detail ? "：" + detail.slice(0, 1200) : "（lark-cli 未输出错误详情）"}`,
           );
+          if (this.isUnsubscribedError(detail)) {
+            this.stopped = true;
+            this.logger?.error(
+              `事件 ${this.eventKey} 的订阅前置条件未满足，已停止重连。请到飞书开发者后台 → 事件与回调 → 回调配置 添加 ${this.eventKey}，并发布新版本后重启桥接。`,
+            );
+            return;
+          }
           if (!detail) {
             this.logger?.error(
               "排查建议：确认应用已开启 im.message.receive_v1 事件且已发布、具备机器人能力与 im:message.p2p_msg:readonly 权限、网络与 DNS 正常；可在终端手动执行 lark-cli event consume im.message.receive_v1 --as bot 复现",

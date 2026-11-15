@@ -229,3 +229,39 @@ test("缺少 token 或卡片时不发请求", async () => {
   const result = await lark.updateCardByToken("", "");
   assert.equal(result.code, 1);
 });
+
+test("识别回调未订阅的错误信息", () => {
+  const lark = new LarkCli({});
+  assert.equal(lark.isUnsubscribedError("requires callbacks not subscribed"), true);
+  assert.equal(lark.isUnsubscribedError("failed_precondition: callback missing"), true);
+  assert.equal(lark.isUnsubscribedError("network timeout"), false);
+  assert.equal(lark.isUnsubscribedError(""), false);
+});
+
+test("回调未订阅时停止重连并只提示一次", async () => {
+  let spawnCount = 0;
+  const errors = [];
+  const lark = new LarkCli({
+    eventKey: "card.action.trigger",
+    logger: { error: (m) => errors.push(String(m)), warn: () => {}, debug: () => {} },
+    spawnImpl: () => {
+      spawnCount += 1;
+      return fakeChild({
+        code: 2,
+        stderr: JSON.stringify({
+          ok: false,
+          error: {
+            type: "validation",
+            subtype: "failed_precondition",
+            message: "EventKey card.action.trigger requires callbacks not subscribed in console",
+          },
+        }),
+      });
+    },
+  });
+  const handle = lark.startConsuming({ onEvent: () => {} });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(spawnCount, 1);
+  assert.ok(errors.some((m) => /停止重连/.test(m)));
+  handle.stop();
+});
