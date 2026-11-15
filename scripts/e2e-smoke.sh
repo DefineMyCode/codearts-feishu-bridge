@@ -73,6 +73,11 @@ if (!row || row.session_id !== "ses_e2e") {
   console.error("会话未写入数据库");
   process.exit(1);
 }
+const done = db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE status = ?").get("succeeded");
+if (Number(done.c) !== 1) {
+  console.error("任务未记录为成功");
+  process.exit(1);
+}
 db.close();
 ' "$WORK/tasks.db"
 echo "E2E SMOKE PASS"

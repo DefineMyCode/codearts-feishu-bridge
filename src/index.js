@@ -10,6 +10,7 @@ import { createMessageHandler } from "./handler.js";
 import { runCodearts } from "./codearts.js";
 import { cleanMediaDir } from "./media.js";
 import { TaskStore } from "./taskstore.js";
+import { recoverTasks } from "./recovery.js";
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel });
@@ -82,7 +83,28 @@ handle = createMessageHandler({
   runCodearts,
   deduper,
   batcher,
+  store,
 });
+
+const recovery = recoverTasks({
+  store,
+  config,
+  logger,
+  submit: (task) => {
+    const run = handle.startTask(task);
+    if (run && typeof run.catch === "function") {
+      run.catch((err) => logger.error("恢复任务执行失败", err));
+    }
+  },
+});
+logger.info(
+  `启动恢复完成 | 中断=${recovery.interrupted} 重投=${recovery.requeued} 投递=${recovery.submitted}`,
+);
+
+const taskRetentionMs =
+  config.taskRetentionDays > 0 ? config.taskRetentionDays * 24 * 60 * 60 * 1000 : 0;
+const removedTasks = store.cleanupTasks({ retentionMs: taskRetentionMs });
+if (removedTasks > 0) logger.info(`已清理 ${removedTasks} 个过期任务记录`);
 
 const consumer = lark.startConsuming({
   onEvent: (event) => {
@@ -132,7 +154,7 @@ logger.info(
 );
 
 let stopping = false;
-function shutdown(signal) {
+async function shutdown(signal) {
   if (stopping) return;
   stopping = true;
   logger.info(`收到 ${signal}，正在退出`);
@@ -144,6 +166,21 @@ function shutdown(signal) {
     batcher.flushAll();
   } catch (err) {
     logger.error("刷新批处理队列失败", err);
+  }
+  try {
+    handle.abortAll?.();
+  } catch (err) {
+    logger.error("中止任务失败", err);
+  }
+  const deadline = Date.now() + 4000;
+  while (store.countByStatus().running > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  try {
+    const left = store.markRunningAsInterrupted({ error: "服务停止中断" });
+    if (left > 0) logger.warn(`仍有 ${left} 个任务未结束，已标记为中断`);
+  } catch (err) {
+    logger.error("标记中断任务失败", err);
   }
   try {
     sessions.save();
@@ -159,5 +196,9 @@ function shutdown(signal) {
   setTimeout(() => process.exit(0), 300).unref();
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => {
+  shutdown("SIGINT").catch((err) => logger.error("退出失败", err));
+});
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM").catch((err) => logger.error("退出失败", err));
+});

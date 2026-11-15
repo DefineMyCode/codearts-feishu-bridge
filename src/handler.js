@@ -12,6 +12,7 @@ import { summarizeResult } from "./codearts.js";
 import { buildCardMarkdown, buildProgressCard } from "./card.js";
 import { extractMessageId } from "./larkcli.js";
 import { composePrompt, extractResources, isMediaMessage } from "./media.js";
+import { taskToMessage } from "./recovery.js";
 
 const HELP_TEXT = [
   "码道飞书桥接命令：",
@@ -32,6 +33,7 @@ export function createMessageHandler({
   runCodearts,
   deduper,
   batcher,
+  store,
 }) {
   const seen = deduper || new Deduper(500);
   const perUser = config.groupSessionsPerUser !== false;
@@ -259,19 +261,56 @@ export function createMessageHandler({
     return reply(message.messageId, HELP_TEXT);
   }
 
-  function startRun(message) {
-    const key = sessionKeyFor(message);
-    if (queue.isBusy(key)) {
+  function createTaskRecord(message, key) {
+    if (!store) return null;
+    return store.createTask({
+      sessionKey: key,
+      chatId: message.chatId,
+      messageId: message.messageId,
+      prompt: message.text || "",
+      media: {
+        chatType: message.chatType,
+        messageType: message.messageType,
+        mediaType: message.mediaType,
+        text: message.text,
+        mentions: message.mentions,
+        senderId: message.senderId,
+      },
+    });
+  }
+
+  function recordResult(taskId, result) {
+    if (!store || !taskId) return;
+    if (result.aborted) {
+      store.markInterrupted(taskId, { error: "任务被中止" });
+      return;
+    }
+    if (result.timedOut) {
+      store.markFailed(taskId, { error: "任务超时" });
+      return;
+    }
+    if (result.spawnError || result.error) {
+      store.markFailed(taskId, { error: result.spawnError || result.error });
+      return;
+    }
+    store.markSucceeded(taskId, { summary: summarizeResult(result).slice(0, 4000) });
+  }
+
+  function startRun(message, { key: explicitKey, task = null } = {}) {
+    const key = explicitKey || sessionKeyFor(message);
+    if (!task && queue.isBusy(key)) {
       return reply(message.messageId, "上一个任务还在执行。发送 /stop 可终止，或稍后再试。");
     }
 
+    const taskId = task ? task.id : createTaskRecord(message, key);
     const controller = new AbortController();
     running.set(key, controller);
 
     const run = queue.push(key, async () => {
       const reactionId = await markProcessing(message);
-      let progressMessageId = "";
+      let progressMessageId = task?.progressMessageId || "";
       try {
+        if (store && taskId) store.markRunning(taskId);
         if (progressCardEnabled()) {
           const sent = await lark.replyCard(
             message.messageId,
@@ -281,12 +320,19 @@ export function createMessageHandler({
               ],
             }),
           );
-          if (sent?.code === 0) progressMessageId = extractMessageId(sent);
+          if (sent?.code === 0) {
+            const sentId = extractMessageId(sent);
+            if (sentId) {
+              progressMessageId = sentId;
+              if (store && taskId) store.setProgressMessageId(taskId, sentId);
+            }
+          }
         }
         if (!progressMessageId && config.ack) {
           await reply(message.messageId, "已收到，开始执行…（发送 /stop 可终止）");
         }
-        const prompt = await buildPrompt(message);
+        const prompt = task && task.attempts > 0 ? task.prompt : await buildPrompt(message);
+        if (store && taskId) store.updatePrompt(taskId, prompt);
         const result = await runCodearts({
           bin: config.codeartsBin,
           prompt,
@@ -306,9 +352,11 @@ export function createMessageHandler({
         } catch (err) {
           logger?.error("保存会话状态失败", err);
         }
+        recordResult(taskId, result);
         await reply(message.messageId, summarizeResult(result), { progressMessageId });
         if (result.error || result.spawnError) await markFailure(message);
       } catch (err) {
+        if (store && taskId) store.markFailed(taskId, { error: err?.message || String(err) });
         await markFailure(message);
         throw err;
       } finally {
@@ -319,6 +367,15 @@ export function createMessageHandler({
 
     run.catch((err) => logger?.error("任务执行异常", err));
     return run;
+  }
+
+  function startTask(task) {
+    return startRun(taskToMessage(task), { key: task.sessionKey, task });
+  }
+
+  function abortAll() {
+    for (const controller of running.values()) controller.abort();
+    return running.size;
   }
 
   async function notifyCard(raw, { title, text, template }) {
@@ -419,6 +476,8 @@ export function createMessageHandler({
   }
 
   handle.startRun = startRun;
+  handle.startTask = startTask;
+  handle.abortAll = abortAll;
   handle.cardAction = handleCardAction;
   return handle;
 }

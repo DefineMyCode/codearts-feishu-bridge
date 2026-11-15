@@ -12,7 +12,7 @@
   → lark-cli im +messages-reply（回到原消息）
 ```
 
-依赖两个命令行工具：`lark-cli`（飞书官方 CLI）与 `codearts`（码道 CLI）。Node.js ≥ 20，不用 `npm install`。
+依赖两个命令行工具：`lark-cli`（飞书官方 CLI）与 `codearts`（码道 CLI）。Node.js ≥ 24（使用内置 node:sqlite 持久化任务），不用 `npm install`。
 
 ## 一、准备
 
@@ -85,8 +85,12 @@ cp .env.example .env
 | `BRIDGE_REACTIONS` | 否 | 是否用表情标记处理状态，默认 `true` |
 | `REACTION_PROCESSING` / `REACTION_FAILURE` | 否 | 处理中与失败用的表情类型，默认 `Typing` / `CrossMark` |
 | `BRIDGE_PROGRESS_CARD` | 否 | 是否用一张“执行中”卡片原位更新为结果，默认 `true`；更新失败自动回退为普通回复 |
-| `DEDUP_FILE` | 否 | 去重记录落盘位置，默认 `./data/seen.json` |
+| `DEDUP_FILE` | 否 | 去重记录落盘位置，默认 `./data/seen.json`，仅作为一次性迁移来源 |
 | `DEDUP_TTL_MS` / `DEDUP_MAX` | 否 | 去重有效期与容量，默认 24 小时 / 2048 条 |
+| `TASK_DB` | 是 | 任务库绝对路径；必填，缺失或相对路径会启动失败 |
+| `TASK_AUTO_RETRY` | 否 | 重启后是否自动重投中断任务，默认 `true` |
+| `TASK_MAX_ATTEMPTS` | 否 | 总尝试次数上限，含首次，默认 2 |
+| `TASK_RETENTION_DAYS` | 否 | 终态任务保留天数，默认 30；0 表示不清理 |
 
 ## 三、启动
 

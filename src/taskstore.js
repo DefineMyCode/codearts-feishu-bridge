@@ -185,6 +185,10 @@ export class TaskStore {
       .run(progressMessageId, id).changes;
   }
 
+  updatePrompt(id, prompt) {
+    return this.db.prepare("UPDATE tasks SET prompt = ? WHERE id = ?").run(prompt, id).changes;
+  }
+
   listByStatus(status) {
     const allowed = TASK_STATES.includes(status);
     if (!allowed) throw new Error(`未知任务状态: ${status}`);
@@ -359,11 +363,10 @@ export class TaskStore {
 }
 
 function safeParse(value) {
-  if (!value) return [];
+  if (!value) return null;
   try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
+    return JSON.parse(value);
   } catch {
-    return [];
+    return null;
   }
 }

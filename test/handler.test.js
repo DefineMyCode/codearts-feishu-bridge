@@ -7,6 +7,7 @@ import { createMessageHandler } from "../src/handler.js";
 import { SessionStore } from "../src/sessions.js";
 import { TaskQueue } from "../src/queue.js";
 import { Deduper, normalizeEvent } from "../src/message.js";
+import { TaskStore } from "../src/taskstore.js";
 
 function makeConfig(overrides = {}) {
   return {
@@ -67,7 +68,7 @@ function makeLark() {
   return { lark, replies, reactions };
 }
 
-function makeHarness({ config = makeConfig(), runCodearts, batcher } = {}) {
+function makeHarness({ config = makeConfig(), runCodearts, batcher, store } = {}) {
   const { lark, replies, reactions } = makeLark();
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "handler-")), "sessions.json");
   const sessions = new SessionStore(file).load();
@@ -82,8 +83,9 @@ function makeHarness({ config = makeConfig(), runCodearts, batcher } = {}) {
     runCodearts: runCodearts || (async () => ({ text: "done", sessionID: "ses_new", exitCode: 0 })),
     deduper: new Deduper(500),
     batcher,
+    store,
   });
-  return { handle, replies, reactions, sessions, queue, errors };
+  return { handle, replies, reactions, sessions, queue, errors, store };
 }
 
 function event(overrides = {}) {
@@ -610,4 +612,43 @@ test("没有对应任务时按钮回调给出提示", async () => {
     token: "tok_2",
   });
   assert.equal(result.status, "no-task");
+});
+
+function makeStore() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "handler-task-"));
+  return new TaskStore(path.join(dir, "tasks.db")).open();
+}
+
+test("带任务库时任务从排队记录到成功", async () => {
+  const store = makeStore();
+  const { handle } = makeHarness({ store });
+  await (await handle(event())).run;
+
+  const tasks = store.listByStatus("succeeded");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].messageId, "om_1");
+  assert.equal(tasks[0].attempts, 1);
+  assert.equal(tasks[0].sessionKey, "oc_1");
+  store.close();
+});
+
+test("任务被中止时在库中标记为中断", async () => {
+  const store = makeStore();
+  const { handle } = makeHarness({
+    store,
+    runCodearts: ({ signal }) =>
+      new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({ text: "stopped", aborted: true }));
+      }),
+  });
+
+  const first = await handle(event({ message_id: "om_abort" }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await handle(event({ message_id: "om_stop", content: "/stop" }));
+  await first.run;
+
+  const tasks = store.listByStatus("interrupted");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].error, "任务被中止");
+  store.close();
 });
