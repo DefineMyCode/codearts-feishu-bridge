@@ -193,10 +193,24 @@ export function buildProgressCard({
   title = "任务执行中",
   text = "任务执行中…（发送 /stop 可终止）",
   template = "blue",
+  actions = [],
 } = {}) {
+  const elements = [{ tag: "markdown", content: text }];
+  if (Array.isArray(actions) && actions.length > 0) {
+    elements.push({
+      tag: "action",
+      layout: "bisected",
+      actions: actions.map((item) => ({
+        tag: "button",
+        text: { tag: "plain_text", content: item.text || "操作" },
+        type: item.type || "default",
+        value: item.value || {},
+      })),
+    });
+  }
   return JSON.stringify({
     config: { wide_screen_mode: true, update_multi: true },
     header: { title: { tag: "plain_text", content: title }, template },
-    elements: [{ tag: "markdown", content: text }],
+    elements,
   });
 }

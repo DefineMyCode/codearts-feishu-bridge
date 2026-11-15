@@ -273,7 +273,14 @@ export function createMessageHandler({
       let progressMessageId = "";
       try {
         if (progressCardEnabled()) {
-          const sent = await lark.replyCard(message.messageId, buildProgressCard());
+          const sent = await lark.replyCard(
+            message.messageId,
+            buildProgressCard({
+              actions: [
+                { text: "停止任务", type: "danger", value: { cmd: "/stop", key } },
+              ],
+            }),
+          );
           if (sent?.code === 0) progressMessageId = extractMessageId(sent);
         }
         if (!progressMessageId && config.ack) {
@@ -312,6 +319,60 @@ export function createMessageHandler({
 
     run.catch((err) => logger?.error("任务执行异常", err));
     return run;
+  }
+
+  async function notifyCard(raw, { title, text, template }) {
+    const card = buildProgressCard({ title, text, template });
+    if (raw.token && typeof lark.updateCardByToken === "function") {
+      try {
+        const result = await lark.updateCardByToken(raw.token, card);
+        if (result?.code === 0) return true;
+      } catch (err) {
+        logger?.debug?.("更新回调卡片失败", err?.message || String(err));
+      }
+    }
+    if (raw.chat_id && typeof lark.sendText === "function") {
+      try {
+        await lark.sendText(raw.chat_id, text);
+      } catch (err) {
+        logger?.warn?.("发送卡片反馈失败", err?.message || String(err));
+      }
+    }
+    return false;
+  }
+
+  async function handleCardAction(raw) {
+    if (!raw || raw.type !== "card.action.trigger") return { status: "ignored" };
+    let value = {};
+    if (typeof raw.action_value === "string") {
+      try {
+        value = JSON.parse(raw.action_value);
+      } catch {
+        value = {};
+      }
+    } else if (raw.action_value && typeof raw.action_value === "object") {
+      value = raw.action_value;
+    }
+    if (value.cmd !== "/stop") return { status: "ignored" };
+
+    const key = String(value.key || "");
+    const controller = running.get(key);
+    if (!controller) {
+      await notifyCard(raw, {
+        title: "任务已结束",
+        text: "这个任务已经结束，无需停止。",
+        template: "grey",
+      });
+      return { status: "no-task" };
+    }
+
+    controller.abort();
+    await notifyCard(raw, {
+      title: "正在停止",
+      text: "已发送停止信号，任务将终止。",
+      template: "orange",
+    });
+    return { status: "stopped", key };
   }
 
   async function handle(rawEvent) {
@@ -358,5 +419,6 @@ export function createMessageHandler({
   }
 
   handle.startRun = startRun;
+  handle.cardAction = handleCardAction;
   return handle;
 }

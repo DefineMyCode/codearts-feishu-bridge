@@ -203,3 +203,29 @@ test("资源返回非法 JSON 时返回空数组", async () => {
   const lark = new LarkCli({ spawnImpl: () => fakeChild({ stdout: "not json" }) });
   assert.deepEqual(await lark.fetchMessageResources("om_1"), []);
 });
+
+test("按 token 更新卡片时构造正确的请求", async () => {
+  const calls = [];
+  const lark = new LarkCli({
+    spawnImpl: (bin, args) => {
+      calls.push(args);
+      return fakeChild({ stdout: '{"ok":true}' });
+    },
+  });
+  const card = JSON.stringify({ config: {}, elements: [] });
+  const result = await lark.updateCardByToken("tok_1", card);
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls[0].slice(0, 4), [
+    "api",
+    "POST",
+    "/open-apis/interactive/v1/card/update",
+    "--data",
+  ]);
+  assert.match(calls[0][4], /"token":"tok_1"/);
+});
+
+test("缺少 token 或卡片时不发请求", async () => {
+  const lark = new LarkCli({ spawnImpl: () => fakeChild({}) });
+  const result = await lark.updateCardByToken("", "");
+  assert.equal(result.code, 1);
+});

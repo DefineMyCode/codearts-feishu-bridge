@@ -91,3 +91,21 @@ test("进度卡片支持自定义标题与颜色", () => {
   assert.equal(card.header.template, "red");
   assert.equal(card.elements[0].content, "错误详情");
 });
+
+test("进度卡片可附带按钮动作", () => {
+  const card = JSON.parse(
+    buildProgressCard({
+      actions: [{ text: "停止任务", type: "danger", value: { cmd: "/stop", key: "oc_1" } }],
+    }),
+  );
+  const action = card.elements.at(-1);
+  assert.equal(action.tag, "action");
+  assert.equal(action.actions[0].text.content, "停止任务");
+  assert.equal(action.actions[0].type, "danger");
+  assert.deepEqual(action.actions[0].value, { cmd: "/stop", key: "oc_1" });
+});
+
+test("没有动作时不生成 action 元素", () => {
+  const card = JSON.parse(buildProgressCard());
+  assert.equal(card.elements.length, 1);
+});

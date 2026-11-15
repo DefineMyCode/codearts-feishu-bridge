@@ -47,7 +47,7 @@
 实验结论（2026-11-15 实测）：codearts 当前版本在 --manual_approval 下，无论是否分配伪终端，都不产生审批事件、也不等待 stdin；写文件、执行 shell 命令、删除目录均直接完成，事件流只有 step/tool/text。因此审批按钮与选择题卡片不可行，本阶段只保留 auto 模式与事后审计。
 
 1. 卡片原位更新已实现：任务开始时发送“执行中”卡片，完成后用 PATCH /open-apis/im/v1/messages/{message_id} 更新为结果；更新失败自动回退为普通消息。开关为 BRIDGE_PROGRESS_CARD，默认开启。
-2. 订阅 card.action.trigger 仍是后续按钮交互的前提，当前未接入。
+2. 已接入 card.action.trigger：进度卡片带“停止任务”按钮，点击后终止对应会话的任务，并用回调 token 更新卡片；更新失败回退为发送一条文本。按钮 value 携带 cmd 与 sessionKey，后续可复用同一协议扩展其他按钮。
 3. 待验证项：卡片更新 token 的有效期与更新次数上限在真实长任务下的表现。
 
 ### P2：多类型入站（已实现）

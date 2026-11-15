@@ -80,6 +80,19 @@ const consumer = lark.startConsuming({
   onFatal: (detail) => logger.error("事件流持续重连失败，请检查 lark-cli 配置:", detail),
 });
 
+const cardLark = new LarkCli({
+  bin: config.larkBin,
+  identity: config.larkIdentity,
+  eventKey: "card.action.trigger",
+  logger,
+});
+const cardConsumer = cardLark.startConsuming({
+  onEvent: (event) => {
+    handle.cardAction(event).catch((err) => logger.error("卡片回调处理失败", err));
+  },
+  onFatal: (detail) => logger.error("卡片回调流持续重连失败:", detail),
+});
+
 if (config.approvalMode === "full") {
   logger.warn("已启用 full_access：任务将跳过沙箱与全部安全检查，请务必配置 ALLOWED_CHAT_IDS");
 }
@@ -97,6 +110,7 @@ function shutdown(signal) {
   stopping = true;
   logger.info(`收到 ${signal}，正在退出`);
   consumer.stop();
+  cardConsumer.stop();
   batcher.stop();
   try {
     batcher.flushAll();

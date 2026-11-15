@@ -156,7 +156,7 @@ sudo systemctl disable --now codearts-feishu-bridge
 - **群聊**：`@机器人 你的任务`（需配置 `BOT_NAME` 才会精确匹配）
 - `/help`：帮助
 - `/new`：清掉当前会话上下文，下一条消息开新会话
-- `/stop`：终止当前任务（SIGTERM，3 秒后 SIGKILL）
+- `/stop`：终止当前任务（SIGTERM，3 秒后 SIGKILL）；任务执行中的卡片上也带“停止任务”按钮，点击等同发送 `/stop`
 - `/status`：查看空闲/执行中、会话 ID、活跃会话数
 
 同一会话内的任务是串行的；不同会话受 `CODEARTS_MAX_CONCURRENCY` 限制。

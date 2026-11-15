@@ -6,7 +6,7 @@ import path from "node:path";
 import { createMessageHandler } from "../src/handler.js";
 import { SessionStore } from "../src/sessions.js";
 import { TaskQueue } from "../src/queue.js";
-import { Deduper } from "../src/message.js";
+import { Deduper, normalizeEvent } from "../src/message.js";
 
 function makeConfig(overrides = {}) {
   return {
@@ -405,7 +405,7 @@ test("配置批处理器时消息进入批处理而不立即执行", async () =>
 
 test("批处理后的合并消息可通过 startRun 执行", async () => {
   const { handle, replies } = makeHarness({ config: makeConfig({ ack: false }) });
-  const run = handle.startRun(event({ message_id: "om_merged", content: "合并后的任务" }));
+  const run = handle.startRun(normalizeEvent(event({ message_id: "om_merged", content: "合并后的任务" })));
   await run;
   assert.equal(replies.length, 1);
   assert.equal(replies[0].text, "done");
@@ -562,4 +562,52 @@ test("媒体消息不进入文本批处理", async () => {
   const result = await handle(event({ message_type: "image", content: "[Image: img_1]" }));
   assert.equal(result.status, "started");
   assert.equal(batcher.added.length, 0);
+});
+
+test("进度卡片带停止按钮，点击后终止任务", async () => {
+  let aborted = false;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { handle, events } = makeProgressHarness({
+    runCodearts: ({ signal }) =>
+      new Promise((resolve) => {
+        signal.addEventListener("abort", () => {
+          aborted = true;
+          resolve({ text: "stopped", aborted: true });
+        });
+        gate.then(() => resolve({ text: "done", sessionID: "ses_btn" }));
+      }),
+  });
+
+  const run = handle.startRun(normalizeEvent(event({ message_id: "om_btn" })));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  const card = events.find((item) => item.action === "replyCard").card;
+  const action = card.elements.at(-1);
+  assert.equal(action.tag, "action");
+  assert.deepEqual(action.actions[0].value, { cmd: "/stop", key: "oc_1" });
+
+  const result = await handle.cardAction({
+    type: "card.action.trigger",
+    chat_id: "oc_1",
+    action_value: JSON.stringify({ cmd: "/stop", key: "oc_1" }),
+    token: "tok_1",
+  });
+  assert.equal(result.status, "stopped");
+  assert.equal(aborted, true);
+  release();
+  await run;
+});
+
+test("没有对应任务时按钮回调给出提示", async () => {
+  const { handle } = makeProgressHarness();
+  const result = await handle.cardAction({
+    type: "card.action.trigger",
+    chat_id: "oc_1",
+    action_value: JSON.stringify({ cmd: "/stop", key: "oc_missing" }),
+    token: "tok_2",
+  });
+  assert.equal(result.status, "no-task");
 });

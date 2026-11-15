@@ -290,6 +290,22 @@ export class LarkCli {
     }
   }
 
+  async updateCardByToken(token, card) {
+    if (!token || !card) return { code: 1, error: "missing token or card" };
+    return this.call(
+      [
+        "api",
+        "POST",
+        "/open-apis/interactive/v1/card/update",
+        "--data",
+        JSON.stringify({ token, card: JSON.parse(card) }),
+        "--as",
+        this.identity,
+      ],
+      { timeoutMs: 30000 },
+    );
+  }
+
   async addReaction(messageId, emojiType) {
     if (!messageId || !emojiType) return "";
     const result = await this.call(
