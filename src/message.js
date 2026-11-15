@@ -18,22 +18,31 @@ export function normalizeSenderId(value) {
   return idx > 0 ? raw.slice(idx + 1).trim() : raw;
 }
 
+export const TEXT_MESSAGE_TYPES = ["text", "post"];
+export const MEDIA_MESSAGE_TYPES = ["image", "file", "audio", "media"];
+
 export function normalizeEvent(raw) {
   if (!raw || raw.type !== "im.message.receive_v1") return null;
   const chatId = raw.chat_id;
   const messageId = raw.message_id || raw.id;
   if (!chatId || !messageId) return null;
   if (raw.sender_type && raw.sender_type !== "user") return null;
-  if (raw.message_type && raw.message_type !== "text" && raw.message_type !== "post") return null;
+
+  const messageType = String(raw.message_type || "text").toLowerCase();
+  if (!TEXT_MESSAGE_TYPES.includes(messageType) && !MEDIA_MESSAGE_TYPES.includes(messageType)) {
+    return null;
+  }
 
   const mentions = Array.isArray(raw.mentions) ? raw.mentions : [];
   const text = renderMentions(raw.content, mentions);
-  if (!text) return null;
+  if (!text && !MEDIA_MESSAGE_TYPES.includes(messageType)) return null;
 
   return {
     chatId,
     chatType: raw.chat_type || "p2p",
     messageId,
+    messageType,
+    mediaType: MEDIA_MESSAGE_TYPES.includes(messageType) ? messageType : "",
     text,
     mentions,
     senderId: normalizeSenderId(raw.sender_id || raw.sender_open_id || ""),

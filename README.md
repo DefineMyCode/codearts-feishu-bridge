@@ -78,6 +78,9 @@ cp .env.example .env
 | `TEXT_BATCH_DELAY_MS` | 否 | 同一会话连续文本的合并静默期，默认 600 |
 | `TEXT_BATCH_MAX_MESSAGES` | 否 | 单批最大合并条数，默认 8 |
 | `TEXT_BATCH_MAX_CHARS` | 否 | 单批最大合并字符数，默认 4000 |
+| `BRIDGE_MEDIA` | 否 | 是否接收图片/文件/音频/视频并下载到本地，默认 `true` |
+| `MEDIA_DIR` | 否 | 附件下载根目录，默认 `./data/media` |
+| `TEXT_INJECT_MAX_BYTES` / `TEXT_INJECT_MAX_CHARS` | 否 | 文本附件自动注入正文的大小与字符上限，默认 100 KB / 8000 字符 |
 | `BRIDGE_REACTIONS` | 否 | 是否用表情标记处理状态，默认 `true` |
 | `REACTION_PROCESSING` / `REACTION_FAILURE` | 否 | 处理中与失败用的表情类型，默认 `Typing` / `CrossMark` |
 | `BRIDGE_PROGRESS_CARD` | 否 | 是否用一张“执行中”卡片原位更新为结果，默认 `true`；更新失败自动回退为普通回复 |

@@ -169,3 +169,37 @@ test("startConsuming 把 stdout 行解析为事件，stop 后不再重连", asyn
   await new Promise((resolve) => setTimeout(resolve, 1200));
   assert.equal(spawnCount, countAtStop);
 });
+
+test("解析消息资源并映射为本地路径", async () => {
+  const lark = new LarkCli({
+    spawnImpl: () =>
+      fakeChild({
+        stdout: JSON.stringify({
+          ok: true,
+          data: {
+            messages: [
+              {
+                resources: [
+                  { key: "img_1", local_path: "/tmp/a.png", size_bytes: 70, type: "image" },
+                ],
+              },
+            ],
+          },
+        }),
+      }),
+  });
+  const resources = await lark.fetchMessageResources("om_1", { cwd: "/tmp" });
+  assert.deepEqual(resources, [
+    { key: "img_1", localPath: "/tmp/a.png", sizeBytes: 70, type: "image" },
+  ]);
+});
+
+test("资源接口失败时返回空数组", async () => {
+  const lark = new LarkCli({ spawnImpl: () => fakeChild({ code: 1, stderr: "boom" }) });
+  assert.deepEqual(await lark.fetchMessageResources("om_1"), []);
+});
+
+test("资源返回非法 JSON 时返回空数组", async () => {
+  const lark = new LarkCli({ spawnImpl: () => fakeChild({ stdout: "not json" }) });
+  assert.deepEqual(await lark.fetchMessageResources("om_1"), []);
+});

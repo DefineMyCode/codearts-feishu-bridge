@@ -50,11 +50,12 @@
 2. 订阅 card.action.trigger 仍是后续按钮交互的前提，当前未接入。
 3. 待验证项：卡片更新 token 的有效期与更新次数上限在真实长任务下的表现。
 
-### P2：多类型入站
+### P2：多类型入站（已实现）
 
-1. 放开 image / file / audio / media。
-2. 用 im +messages-resources-download 下载到 data/media/{messageId}/，把路径拼进 prompt。
-3. 小于 100 KB 的 txt / md 直接注入正文。
+1. 已放开 image / file / audio / media；normalizeEvent 对媒体消息允许文本为空。
+2. 资源获取实测走 im +messages-mget --download-resources：事件载荷与 mget 的普通返回都不暴露 file_key，但 mget 带下载开关时会返回 resources[].local_path，文件落到 <cwd>/lark-im-resources/。因此下载根目录为 MEDIA_DIR/lark-im-resources/，不按 messageId 分子目录。
+3. 文本类附件（txt/md/csv/json/jsonl/log/yml/yaml）在 100 KB 与 8000 字符以内直接注入提示词；其余类型只给本地路径。
+4. 媒体消息不进入文本批处理，避免附件内容被合并进普通文本。
 
 ### P3：持久化队列与多实例支持（需事件分发层）
 

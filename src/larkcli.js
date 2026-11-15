@@ -119,9 +119,10 @@ export class LarkCli {
     this.restartDelay = 1000;
   }
 
-  async call(args, { timeoutMs = 120000 } = {}) {
+  async call(args, { timeoutMs = 120000, cwd } = {}) {
     return new Promise((resolve) => {
       const child = this.spawnImpl(this.bin, [...this.baseArgs, ...args], {
+        cwd,
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stdout = "";
@@ -195,6 +196,41 @@ export class LarkCli {
       ],
       { timeoutMs: 30000 },
     );
+  }
+
+  async fetchMessageResources(messageId, { cwd } = {}) {
+    if (!messageId) return [];
+    const result = await this.call(
+      [
+        "im",
+        "+messages-mget",
+        "--message-ids",
+        messageId,
+        "--download-resources",
+        "--as",
+        this.identity,
+      ],
+      { timeoutMs: 60000, cwd },
+    );
+    if (result.code !== 0) {
+      this.logger?.warn?.("下载消息资源失败", (result.stderr || "").slice(0, 200));
+      return [];
+    }
+    try {
+      const body = JSON.parse(result.stdout || "");
+      const messages = body?.data?.messages || [];
+      return messages
+        .flatMap((item) => (Array.isArray(item.resources) ? item.resources : []))
+        .filter((item) => item && item.local_path)
+        .map((item) => ({
+          key: item.key || "",
+          localPath: item.local_path,
+          sizeBytes: Number(item.size_bytes) || 0,
+          type: item.type || "",
+        }));
+    } catch {
+      return [];
+    }
   }
 
   async addReaction(messageId, emojiType) {

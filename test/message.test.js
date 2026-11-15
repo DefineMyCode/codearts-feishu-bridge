@@ -53,8 +53,21 @@ test("机器人自己发来的消息被忽略", () => {
   assert.equal(normalizeEvent(p2pEvent({ sender_type: "bot" })), null);
 });
 
-test("非文本消息被忽略", () => {
-  assert.equal(normalizeEvent(p2pEvent({ message_type: "image", content: "" })), null);
+test("未支持的消息类型被忽略", () => {
+  assert.equal(normalizeEvent(p2pEvent({ message_type: "sticker", content: "" })), null);
+});
+
+test("图片消息即使没有文本也会归一化", () => {
+  const message = normalizeEvent(p2pEvent({ message_type: "image", content: "" }));
+  assert.equal(message.mediaType, "image");
+  assert.equal(message.messageType, "image");
+  assert.equal(message.text, "");
+});
+
+test("文件消息标记类型并保留渲染文本", () => {
+  const message = normalizeEvent(p2pEvent({ message_type: "file", content: "a.txt" }));
+  assert.equal(message.mediaType, "file");
+  assert.equal(message.text, "a.txt");
 });
 
 test("缺少会话或消息 ID 被忽略", () => {

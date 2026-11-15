@@ -481,3 +481,61 @@ test("关闭进度卡片后恢复确认文本与结果消息", async () => {
   assert.match(cards[0].card.elements[0].content, /已收到/);
   assert.equal(cards[1].card.elements[0].content, "done");
 });
+
+function makeMediaHarness({ resources = [], config = makeConfig(), runCodearts } = {}) {
+  const prompts = [];
+  const lark = {
+    replyCard: async () => ({ code: 0 }),
+    replyMarkdown: async () => ({ code: 0 }),
+    replyText: async () => ({ code: 0 }),
+    fetchMessageResources: async () => resources,
+  };
+  const stateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "handler-")), "sessions.json");
+  const handle = createMessageHandler({
+    config,
+    sessions: new SessionStore(stateFile).load(),
+    queue: new TaskQueue({ maxConcurrency: 1 }),
+    lark,
+    logger: { error: () => {}, warn: () => {}, debug: () => {} },
+    runCodearts:
+      runCodearts ||
+      (async ({ prompt }) => {
+        prompts.push(prompt);
+        return { text: "done", sessionID: "ses_media" };
+      }),
+    deduper: new Deduper(500),
+  });
+  return { handle, prompts };
+}
+
+test("媒体消息下载资源后拼进提示词", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "media-")), "note.txt");
+  fs.writeFileSync(file, "文件里的内容", "utf8");
+  const { handle, prompts } = makeMediaHarness({
+    resources: [{ type: "file", localPath: file, sizeBytes: 20 }],
+  });
+
+  await (
+    await handle(event({ message_type: "file", content: "看下附件", message_id: "om_media" }))
+  ).run;
+
+  assert.match(prompts[0], /看下附件/);
+  assert.match(prompts[0], /【用户附带资源】/);
+  assert.match(prompts[0], /文件里的内容/);
+});
+
+test("资源下载为空时保留原文", async () => {
+  const { handle, prompts } = makeMediaHarness({ resources: [] });
+  await (
+    await handle(event({ message_type: "image", content: "", message_id: "om_img" }))
+  ).run;
+  assert.equal(prompts[0], "用户发送了附件，但桥接未能下载到本地。");
+});
+
+test("媒体消息不进入文本批处理", async () => {
+  const batcher = { added: [], add: (key, message) => batcher.added.push({ key, message }) };
+  const { handle } = makeHarness({ batcher });
+  const result = await handle(event({ message_type: "image", content: "[Image: img_1]" }));
+  assert.equal(result.status, "started");
+  assert.equal(batcher.added.length, 0);
+});

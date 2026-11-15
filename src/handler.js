@@ -9,6 +9,7 @@ import { chunkText } from "./text.js";
 import { summarizeResult } from "./codearts.js";
 import { buildCardMarkdown, buildProgressCard } from "./card.js";
 import { extractMessageId } from "./larkcli.js";
+import { composePrompt, isMediaMessage } from "./media.js";
 
 const HELP_TEXT = [
   "码道飞书桥接命令：",
@@ -127,6 +128,24 @@ export function createMessageHandler({
     );
   }
 
+  async function buildPrompt(message) {
+    if (!isMediaMessage(message) || config.mediaEnabled === false) return message.text;
+    if (typeof lark.fetchMessageResources !== "function") return message.text;
+    let resources = [];
+    try {
+      resources = await lark.fetchMessageResources(message.messageId, { cwd: config.mediaDir });
+    } catch (err) {
+      logger?.warn?.("下载消息资源失败", err?.message || String(err));
+    }
+    if (resources.length === 0) {
+      return message.text || "用户发送了附件，但桥接未能下载到本地。";
+    }
+    return composePrompt(message.text, resources, {
+      maxBytes: config.textInjectMaxBytes,
+      maxChars: config.textInjectMaxChars,
+    });
+  }
+
   async function markProcessing(message) {
     if (!reactionsEnabled || !lark.addReaction) return "";
     try {
@@ -212,9 +231,10 @@ export function createMessageHandler({
         if (!progressMessageId && config.ack) {
           await reply(message.messageId, "已收到，开始执行…（发送 /stop 可终止）");
         }
+        const prompt = await buildPrompt(message);
         const result = await runCodearts({
           bin: config.codeartsBin,
-          prompt: message.text,
+          prompt,
           cwd: config.workdir,
           sessionId: sessionFor(message),
           model: config.model,
@@ -280,7 +300,7 @@ export function createMessageHandler({
       return { status: "unknown-command" };
     }
 
-    if (batcher) {
+    if (batcher && !isMediaMessage(message)) {
       batcher.add(sessionKeyFor(message), message);
       return { status: "batched" };
     }
