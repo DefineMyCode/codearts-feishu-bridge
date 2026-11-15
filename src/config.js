@@ -61,6 +61,14 @@ export function loadConfig(env = process.env) {
   if (!env.CODEARTS_WORKDIR) {
     throw new Error("缺少必填环境变量: CODEARTS_WORKDIR");
   }
+  if (!env.TASK_DB) {
+    throw new Error(
+      "缺少必填环境变量: TASK_DB（必须是绝对路径，例如 /root/codearts-feishu-bridge/data/tasks.db）",
+    );
+  }
+  if (!path.isAbsolute(env.TASK_DB)) {
+    throw new Error(`TASK_DB 必须是绝对路径: ${env.TASK_DB}`);
+  }
 
   const replyFormat = (env.REPLY_FORMAT || "card").toLowerCase();
   if (!REPLY_FORMATS.includes(replyFormat)) {
@@ -107,6 +115,10 @@ export function loadConfig(env = process.env) {
     mediaEnabled: bool(env.BRIDGE_MEDIA, true),
     mediaDir: path.resolve(env.MEDIA_DIR || "./data/media"),
     mediaRetentionDays: nonNegativeInt(env.MEDIA_RETENTION_DAYS, 7),
+    taskDb: path.resolve(env.TASK_DB),
+    taskAutoRetry: bool(env.TASK_AUTO_RETRY, true),
+    taskMaxAttempts: int(env.TASK_MAX_ATTEMPTS, 2),
+    taskRetentionDays: nonNegativeInt(env.TASK_RETENTION_DAYS, 30),
     textInjectMaxBytes: int(env.TEXT_INJECT_MAX_BYTES, 102400),
     textInjectMaxChars: int(env.TEXT_INJECT_MAX_CHARS, 8000),
     reactions: bool(env.BRIDGE_REACTIONS, true),

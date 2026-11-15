@@ -38,6 +38,7 @@ export CODEARTS_BIN="$WORK/codearts"
 export CODEARTS_WORKDIR="$ROOT"
 export STATE_FILE="$WORK/sessions.json"
 export DEDUP_FILE="$WORK/seen.json"
+export TASK_DB="$WORK/tasks.db"
 export REPLY_LOG="$WORK/replies.log"
 export LOG_LEVEL=info
 
@@ -51,10 +52,27 @@ echo "--- 桥接日志 ---"
 cat "$WORK/stdout.log"
 echo "--- 飞书调用 ---"
 cat "$REPLY_LOG" 2>/dev/null || echo "(没有调用)"
-echo "--- 会话状态 ---"
-cat "$WORK/sessions.json" 2>/dev/null || echo "(没有状态文件)"
+echo "--- 会话与任务状态 ---"
+node -e '
+const { DatabaseSync } = require("node:sqlite");
+const db = new DatabaseSync(process.argv[1]);
+const session = db.prepare("SELECT session_id FROM sessions WHERE session_key = ?").get("oc_e2e");
+console.log("会话:", session ? session.session_id : "(未写入)");
+const counts = db.prepare("SELECT status, COUNT(*) AS c FROM tasks GROUP BY status").all();
+console.log("任务:", counts.length ? counts.map((r) => `${r.status}=${r.c}`).join(", ") : "(无)");
+db.close();
+' "$WORK/tasks.db"
 
 grep -q "msg-type interactive" "$WORK/replies.log"
 grep -q "E2E-OK" "$WORK/replies.log"
-grep -q "ses_e2e" "$WORK/sessions.json"
+node -e '
+const { DatabaseSync } = require("node:sqlite");
+const db = new DatabaseSync(process.argv[1]);
+const row = db.prepare("SELECT session_id FROM sessions WHERE session_key = ?").get("oc_e2e");
+if (!row || row.session_id !== "ses_e2e") {
+  console.error("会话未写入数据库");
+  process.exit(1);
+}
+db.close();
+' "$WORK/tasks.db"
 echo "E2E SMOKE PASS"

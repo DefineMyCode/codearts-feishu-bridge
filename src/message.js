@@ -73,17 +73,19 @@ export function parseCommand(text) {
 }
 
 export class Deduper {
-  constructor(options = 500, { now = () => Date.now() } = {}) {
+  constructor(options = 500, { now = () => Date.now(), store } = {}) {
     const opts = typeof options === "number" ? { max: options } : options || {};
     this.limit = Math.max(1, Number(opts.max) || 500);
     this.ttlMs = Math.max(0, Number(opts.ttlMs) || 0);
     this.file = opts.file || "";
     this.logger = opts.logger;
     this.now = now;
+    this.store = store || null;
     this.entries = new Map();
   }
 
   load() {
+    if (this.store) return this;
     if (!this.file) return this;
     try {
       const raw = fs.readFileSync(this.file, "utf8");
@@ -105,7 +107,7 @@ export class Deduper {
   }
 
   save() {
-    if (!this.file) return;
+    if (this.store || !this.file) return;
     const dir = path.dirname(this.file);
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
@@ -131,6 +133,12 @@ export class Deduper {
 
   check(key) {
     if (!key) return true;
+    if (this.store) {
+      if (this.store.hasSeen(key, { ttlMs: this.ttlMs, now: this.now() })) return false;
+      this.store.markSeen(key, this.now());
+      this.store.pruneDedup({ ttlMs: this.ttlMs, max: this.limit, now: this.now() });
+      return true;
+    }
     const at = this.entries.get(key);
     if (at !== undefined) {
       if (this.isExpired(at)) {

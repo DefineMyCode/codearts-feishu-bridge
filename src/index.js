@@ -9,6 +9,7 @@ import { TextBatcher } from "./batching.js";
 import { createMessageHandler } from "./handler.js";
 import { runCodearts } from "./codearts.js";
 import { cleanMediaDir } from "./media.js";
+import { TaskStore } from "./taskstore.js";
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel });
@@ -18,14 +19,23 @@ if (!fs.existsSync(config.workdir)) {
   process.exit(1);
 }
 
-const sessions = new SessionStore(config.stateFile, { logger }).load();
-const queue = new TaskQueue({ maxConcurrency: config.maxConcurrency });
-const deduper = new Deduper({
-  max: config.dedupMax,
+const store = new TaskStore(config.taskDb, { logger }).open();
+const migration = store.importJson({
+  sessionsFile: config.stateFile,
+  dedupFile: config.dedupFile,
   ttlMs: config.dedupTtlMs,
-  file: config.dedupFile,
-  logger,
-}).load();
+});
+if (migration.sessions > 0 || migration.dedup > 0) {
+  logger.info(`已从 JSON 迁移 ${migration.sessions} 条会话、${migration.dedup} 条去重记录`);
+}
+store.pruneDedup({ ttlMs: config.dedupTtlMs, max: config.dedupMax });
+
+const sessions = new SessionStore(config.stateFile, { logger, store }).load();
+const queue = new TaskQueue({ maxConcurrency: config.maxConcurrency });
+const deduper = new Deduper(
+  { max: config.dedupMax, ttlMs: config.dedupTtlMs, logger },
+  { store },
+).load();
 const lark = new LarkCli({
   bin: config.larkBin,
   identity: config.larkIdentity,
@@ -140,6 +150,11 @@ function shutdown(signal) {
     deduper.save();
   } catch (err) {
     logger.error("保存状态失败", err);
+  }
+  try {
+    store.close();
+  } catch (err) {
+    logger.error("关闭数据库失败", err);
   }
   setTimeout(() => process.exit(0), 300).unref();
 }

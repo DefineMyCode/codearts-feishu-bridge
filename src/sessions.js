@@ -8,13 +8,15 @@ export function buildSessionKey({ chatId, senderId = "", chatType = "p2p", perUs
 }
 
 export class SessionStore {
-  constructor(file, { logger } = {}) {
+  constructor(file, { logger, store } = {}) {
     this.file = file;
     this.logger = logger;
+    this.store = store || null;
     this.map = new Map();
   }
 
   load() {
+    if (this.store) return this;
     try {
       const raw = fs.readFileSync(this.file, "utf8");
       const data = JSON.parse(raw);
@@ -30,10 +32,12 @@ export class SessionStore {
   }
 
   get(key) {
+    if (this.store) return this.store.getSession(key);
     return this.map.get(key) || "";
   }
 
   getWithFallback(key, legacyKey = "") {
+    if (this.store) return this.store.getSession(key, legacyKey);
     const value = this.get(key);
     if (value) return value;
     if (!legacyKey || legacyKey === key) return "";
@@ -42,18 +46,25 @@ export class SessionStore {
 
   set(key, sessionId) {
     if (!key || !sessionId) return;
+    if (this.store) {
+      this.store.setSession(key, sessionId);
+      return;
+    }
     this.map.set(key, sessionId);
   }
 
   clear(key) {
+    if (this.store) return this.store.clearSession(key) > 0;
     return this.map.delete(key);
   }
 
   size() {
+    if (this.store) return this.store.countSessions();
     return this.map.size;
   }
 
   save() {
+    if (this.store) return;
     const dir = path.dirname(this.file);
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;

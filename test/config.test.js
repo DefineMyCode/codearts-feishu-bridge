@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.js";
 
-const base = { CODEARTS_WORKDIR: "/tmp/demo" };
+const base = { CODEARTS_WORKDIR: "/tmp/demo", TASK_DB: "/tmp/demo/data/tasks.db" };
 
 test("默认使用卡片回复", () => {
   const config = loadConfig(base);
@@ -96,4 +96,22 @@ test("批处理与去重默认值", () => {
   assert.equal(config.dedupMax, 2048);
   assert.equal(config.dedupTtlMs, 86400000);
   assert.equal(config.reactions, true);
+});
+
+test("缺少 TASK_DB 时报错", () => {
+  assert.throws(() => loadConfig({ CODEARTS_WORKDIR: "/tmp/demo" }), /TASK_DB/);
+});
+
+test("TASK_DB 必须是绝对路径", () => {
+  assert.throws(() => loadConfig({ ...base, TASK_DB: "data/tasks.db" }), /绝对路径/);
+});
+
+test("任务队列配置有默认值且可覆盖", () => {
+  const config = loadConfig(base);
+  assert.equal(config.taskDb, "/tmp/demo/data/tasks.db");
+  assert.equal(config.taskAutoRetry, true);
+  assert.equal(config.taskMaxAttempts, 2);
+  assert.equal(config.taskRetentionDays, 30);
+  assert.equal(loadConfig({ ...base, TASK_AUTO_RETRY: "false" }).taskAutoRetry, false);
+  assert.equal(loadConfig({ ...base, TASK_MAX_ATTEMPTS: "3" }).taskMaxAttempts, 3);
 });
