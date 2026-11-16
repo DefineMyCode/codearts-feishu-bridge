@@ -196,3 +196,26 @@ test("taskToMessage 从任务还原消息字段", () => {
   assert.equal(message.mentions.length, 1);
   store.close();
 });
+
+test("主动停止的任务不会被重投", async () => {
+  const store = makeStore();
+  const id = seed(store);
+  store.markRunning(id, 1100);
+  store.markStopped(id, { reason: "用户主动停止", now: 1200 });
+
+  const submitted = [];
+  const notified = [];
+  const result = await recoverTasks({
+    store,
+    config: baseConfig,
+    submit: (task) => submitted.push(task),
+    notifyInterrupted: async (task) => notified.push(task.id),
+    now: 2000,
+  });
+
+  assert.equal(result.submitted, 0);
+  assert.equal(result.requeued, 0);
+  assert.equal(notified.length, 0);
+  assert.equal(store.getTask(id).status, "stopped");
+  store.close();
+});

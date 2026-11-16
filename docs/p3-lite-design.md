@@ -110,6 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_dedup_seen ON dedup(seen_at);
 queued ──执行──> running ──成功──> succeeded
                     │
                     ├──失败──> failed
+                    ├──用户主动停止──> stopped（终态，永不重投）
                     └──进程退出/崩溃──> interrupted
 interrupted ──自动重投且未超上限──> queued
 interrupted ──不重投或超上限──> 保持 interrupted
@@ -118,9 +119,11 @@ interrupted ──不重投或超上限──> 保持 interrupted
 约束：
 
 - 状态只能按上图单向迁移，禁止从终态回到 running。
+- stopped 表示用户主动终止（/stop 命令或卡片停止按钮），是终态，重启后不会重投。
+- 服务优雅关闭触发的主动中止仍记为 interrupted，保持在重启后重投，以区别于用户意图。
 - attempts 在进入 running 时加一。
 - TASK_MAX_ATTEMPTS 表示总尝试次数上限，默认 2（首次 + 一次重投）。
-- 终态任务（succeeded / failed / interrupted）保留 TASK_RETENTION_DAYS 天后清理，默认 30 天。
+- 终态任务（succeeded / failed / stopped / interrupted）保留 TASK_RETENTION_DAYS 天后清理，默认 30 天。
 
 ## 六、关键流程
 

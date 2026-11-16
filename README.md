@@ -212,6 +212,7 @@ npm test                 # 单元测试
 - `REPLY_FORMAT=post` 走 `lark-cli --markdown`（飞书 post 富文本），代码块与表格支持有限；`REPLY_FORMAT=text` 为纯文本。
 - 会话、去重与任务记录统一存在 `TASK_DB` 指向的 SQLite 里，仍只支持单实例，不支持多进程共享。
 - 重启时残留的 running 任务会被标记为中断，并按 `TASK_AUTO_RETRY` 与 `TASK_MAX_ATTEMPTS`（默认最多两次尝试）自动重投；重投是整轮重跑，不是断点续跑。
+- 用户主动停止（`/stop` 或卡片按钮）记为 `stopped` 终态，重启不会重投；只有进程重启或崩溃造成的中断才是 `interrupted`，才会按策略重投。
 - 不重投的中断任务会尝试更新原进度卡片为“任务已中断”，超过 25 分钟窗口或更新失败时改为发一条文本说明。
 
 ## License

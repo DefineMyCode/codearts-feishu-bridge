@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { TaskStore, createTaskId } from "../src/taskstore.js";
 
 function makeStore() {
@@ -23,7 +24,7 @@ function seedTask(store, overrides = {}) {
 
 test("建表并写入 schema 版本", () => {
   const store = makeStore();
-  assert.equal(store.getSchemaVersion(), 1);
+  assert.equal(store.getSchemaVersion(), 2);
   assert.equal(store.opened, true);
   store.close();
   assert.equal(store.opened, false);
@@ -210,4 +211,67 @@ test("任务 ID 带前缀与随机后缀", () => {
   const second = createTaskId(1000);
   assert.match(first, /^task_1000_[0-9a-f]{8}$/);
   assert.notEqual(first, second);
+});
+
+test("用户主动停止记为 stopped 终态", () => {
+  const store = makeStore();
+  const id = seedTask(store);
+  store.markRunning(id);
+  assert.equal(store.markStopped(id, { reason: "用户主动停止" }), 1);
+  const task = store.getTask(id);
+  assert.equal(task.status, "stopped");
+  assert.equal(task.error, "用户主动停止");
+  store.close();
+});
+
+test("v1 库升级到 v2 并保留任务数据", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "taskstore-v1-"));
+  const file = path.join(dir, "tasks.db");
+  const db = new DatabaseSync(file);
+  db.exec(`
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE sessions (session_key TEXT PRIMARY KEY, session_id TEXT NOT NULL, updated_at INTEGER NOT NULL);
+    CREATE TABLE dedup (message_id TEXT PRIMARY KEY, seen_at INTEGER NOT NULL);
+    CREATE INDEX idx_dedup_seen ON dedup(seen_at);
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      session_key TEXT NOT NULL,
+      chat_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      media_json TEXT,
+      status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','interrupted')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      progress_message_id TEXT,
+      result_summary TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      started_at INTEGER,
+      finished_at INTEGER
+    );
+    CREATE INDEX idx_tasks_status_created ON tasks(status, created_at);
+    CREATE INDEX idx_tasks_session ON tasks(session_key, status);
+    INSERT INTO meta(key, value) VALUES('schema_version', '1');
+    INSERT INTO tasks(id, session_key, chat_id, message_id, prompt, status, attempts, created_at)
+      VALUES('task_v1', 'oc_1', 'oc_1', 'om_1', '旧任务', 'interrupted', 1, 1000);
+  `);
+  db.close();
+
+  const store = new TaskStore(file).open();
+  assert.equal(store.getSchemaVersion(), 2);
+  const task = store.getTask("task_v1");
+  assert.equal(task.status, "interrupted");
+  assert.equal(task.prompt, "旧任务");
+
+  const id = store.createTask({
+    sessionKey: "oc_1",
+    chatId: "oc_1",
+    messageId: "om_2",
+    prompt: "新任务",
+    now: 2000,
+  });
+  store.markRunning(id, 2100);
+  assert.equal(store.markStopped(id, { now: 2200 }), 1);
+  assert.equal(store.getTask(id).status, "stopped");
+  store.close();
 });

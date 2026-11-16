@@ -632,7 +632,7 @@ test("带任务库时任务从排队记录到成功", async () => {
   store.close();
 });
 
-test("任务被中止时在库中标记为中断", async () => {
+test("用户主动停止时在库中标记为 stopped", async () => {
   const store = makeStore();
   const { handle } = makeHarness({
     store,
@@ -647,9 +647,32 @@ test("任务被中止时在库中标记为中断", async () => {
   await handle(event({ message_id: "om_stop", content: "/stop" }));
   await first.run;
 
+  const tasks = store.listByStatus("stopped");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].error, "用户主动停止");
+  assert.equal(store.listByStatus("interrupted").length, 0);
+  store.close();
+});
+
+test("服务关闭中止任务时标记为中断以便重投", async () => {
+  const store = makeStore();
+  const { handle } = makeHarness({
+    store,
+    runCodearts: ({ signal }) =>
+      new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({ text: "stopped", aborted: true }));
+      }),
+  });
+
+  const first = await handle(event({ message_id: "om_shutdown" }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  handle.abortAll();
+  await first.run;
+
   const tasks = store.listByStatus("interrupted");
   assert.equal(tasks.length, 1);
-  assert.equal(tasks[0].error, "任务被中止");
+  assert.equal(tasks[0].error, "服务停止中断");
+  assert.equal(store.listByStatus("stopped").length, 0);
   store.close();
 });
 

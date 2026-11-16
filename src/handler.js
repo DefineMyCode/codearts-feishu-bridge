@@ -257,6 +257,7 @@ export function createMessageHandler({
       case "/stop": {
         const controller = running.get(sessionKeyFor(message));
         if (!controller) return reply(message.messageId, "当前没有正在执行的任务。");
+        controller.userRequested = true;
         controller.abort();
         return reply(message.messageId, "已发送停止信号。");
       }
@@ -299,10 +300,14 @@ export function createMessageHandler({
     });
   }
 
-  function recordResult(taskId, result) {
+  function recordResult(taskId, result, { userRequested = false } = {}) {
     if (!store || !taskId) return;
     if (result.aborted) {
-      store.markInterrupted(taskId, { error: "任务被中止" });
+      if (userRequested) {
+        store.markStopped(taskId, { reason: "用户主动停止" });
+      } else {
+        store.markInterrupted(taskId, { error: "服务停止中断" });
+      }
       return;
     }
     if (result.timedOut) {
@@ -373,7 +378,7 @@ export function createMessageHandler({
           logger?.error("保存会话状态失败", err);
         }
         const summary = summarizeResult(result);
-        recordResult(taskId, result);
+        recordResult(taskId, result, { userRequested: controller.userRequested === true });
         const replyResult = await reply(message.messageId, summary, { progressMessageId });
         await maybeNotifyCompletion(message, {
           summary,
@@ -449,6 +454,7 @@ export function createMessageHandler({
       return { status: "no-task" };
     }
 
+    controller.userRequested = true;
     controller.abort();
     await notifyCard(raw, {
       title: "正在停止",

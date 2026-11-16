@@ -3,10 +3,10 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
-const TASK_STATES = ["queued", "running", "succeeded", "failed", "interrupted"];
-const FINAL_STATES = ["succeeded", "failed", "interrupted"];
+const TASK_STATES = ["queued", "running", "succeeded", "failed", "stopped", "interrupted"];
+const FINAL_STATES = ["succeeded", "failed", "stopped", "interrupted"];
 
 export function createTaskId(now = Date.now()) {
   return `task_${now}_${randomBytes(4).toString("hex")}`;
@@ -65,14 +65,47 @@ export class TaskStore {
         session_id TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS tasks (
+      CREATE TABLE IF NOT EXISTS dedup (
+        message_id TEXT PRIMARY KEY,
+        seen_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_dedup_seen ON dedup(seen_at);
+    `);
+
+    if (!this.tableExists("tasks")) {
+      this.createTasksTable();
+      this.setSchemaVersion(SCHEMA_VERSION);
+      return;
+    }
+
+    if (this.getSchemaVersion() < 2) {
+      this.rebuildTasksTable();
+    }
+  }
+
+  tableExists(name) {
+    const row = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name);
+    return Boolean(row);
+  }
+
+  setSchemaVersion(version) {
+    this.db
+      .prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)")
+      .run(String(version));
+  }
+
+  createTasksTable() {
+    this.db.exec(`
+      CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
         session_key TEXT NOT NULL,
         chat_id TEXT NOT NULL,
         message_id TEXT NOT NULL,
         prompt TEXT NOT NULL,
         media_json TEXT,
-        status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','interrupted')),
+        status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','stopped','interrupted')),
         attempts INTEGER NOT NULL DEFAULT 0,
         progress_message_id TEXT,
         result_summary TEXT,
@@ -83,19 +116,40 @@ export class TaskStore {
       );
       CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_key, status);
-      CREATE TABLE IF NOT EXISTS dedup (
-        message_id TEXT PRIMARY KEY,
-        seen_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_dedup_seen ON dedup(seen_at);
     `);
+  }
 
-    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
-    if (!row) {
-      this.db
-        .prepare("INSERT INTO meta(key, value) VALUES('schema_version', ?)")
-        .run(String(SCHEMA_VERSION));
-    }
+  rebuildTasksTable() {
+    this.transaction(() => {
+      this.db.exec(`
+        DROP INDEX IF EXISTS idx_tasks_status_created;
+        DROP INDEX IF EXISTS idx_tasks_session;
+        ALTER TABLE tasks RENAME TO tasks_v1;
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY,
+          session_key TEXT NOT NULL,
+          chat_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          media_json TEXT,
+          status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','stopped','interrupted')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          progress_message_id TEXT,
+          result_summary TEXT,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          finished_at INTEGER
+        );
+        INSERT INTO tasks (id, session_key, chat_id, message_id, prompt, media_json, status, attempts, progress_message_id, result_summary, error, created_at, started_at, finished_at)
+          SELECT id, session_key, chat_id, message_id, prompt, media_json, status, attempts, progress_message_id, result_summary, error, created_at, started_at, finished_at FROM tasks_v1;
+        DROP TABLE tasks_v1;
+        CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_key, status);
+      `);
+      this.setSchemaVersion(SCHEMA_VERSION);
+    });
+    this.logger?.info?.("任务表已升级到 schema 2，新增 stopped 终态");
   }
 
   getSchemaVersion() {
@@ -177,6 +231,14 @@ export class TaskStore {
         `UPDATE tasks SET status = 'interrupted', error = ?, finished_at = ? WHERE id = ? AND status = 'running'`,
       )
       .run(error, now, id).changes;
+  }
+
+  markStopped(id, { reason = "用户主动停止", now = Date.now() } = {}) {
+    return this.db
+      .prepare(
+        `UPDATE tasks SET status = 'stopped', error = ?, finished_at = ? WHERE id = ? AND status IN ('queued','running')`,
+      )
+      .run(reason, now, id).changes;
   }
 
   setProgressMessageId(id, progressMessageId) {
