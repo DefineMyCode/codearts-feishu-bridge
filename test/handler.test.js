@@ -652,3 +652,42 @@ test("任务被中止时在库中标记为中断", async () => {
   assert.equal(tasks[0].error, "任务被中止");
   store.close();
 });
+
+test("单段结果原位更新后补发完成提醒", async () => {
+  const { handle, events } = makeProgressHarness();
+  await (await handle(event())).run;
+
+  const notices = events.filter((item) => item.action === "replyText");
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /任务已完成/);
+});
+
+test("多段结果不补发完成提醒", async () => {
+  const { handle, events } = makeProgressHarness({
+    config: makeConfig({ replyChunkSize: 5, replyMaxChunks: 4 }),
+    runCodearts: async () => ({ text: "abcdefghij", sessionID: "ses_long" }),
+  });
+  await (await handle(event())).run;
+
+  assert.equal(events.filter((item) => item.action === "replyText").length, 0);
+});
+
+test("关闭完成提醒后不补发", async () => {
+  const { handle, events } = makeProgressHarness({
+    config: makeConfig({ completionNotice: false }),
+  });
+  await (await handle(event())).run;
+
+  assert.equal(events.filter((item) => item.action === "replyText").length, 0);
+});
+
+test("任务失败时补发失败提醒", async () => {
+  const { handle, events } = makeProgressHarness({
+    runCodearts: async () => ({ error: "boom", text: "" }),
+  });
+  await (await handle(event())).run;
+
+  const notices = events.filter((item) => item.action === "replyText");
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /任务失败/);
+});

@@ -85,6 +85,7 @@ cp .env.example .env
 | `BRIDGE_REACTIONS` | 否 | 是否用表情标记处理状态，默认 `true` |
 | `REACTION_PROCESSING` / `REACTION_FAILURE` | 否 | 处理中与失败用的表情类型，默认 `Typing` / `CrossMark` |
 | `BRIDGE_PROGRESS_CARD` | 否 | 是否用一张“执行中”卡片原位更新为结果，默认 `true`；更新失败自动回退为普通回复 |
+| `BRIDGE_COMPLETION_NOTICE` | 否 | 卡片原位更新成功后补发一条简短完成提醒，默认 `true`；只在单段结果时补发 |
 | `DEDUP_FILE` | 否 | 去重记录落盘位置，默认 `./data/seen.json`，仅作为一次性迁移来源 |
 | `DEDUP_TTL_MS` / `DEDUP_MAX` | 否 | 去重有效期与容量，默认 24 小时 / 2048 条 |
 | `TASK_DB` | 是 | 任务库绝对路径；必填，缺失或相对路径会启动失败 |

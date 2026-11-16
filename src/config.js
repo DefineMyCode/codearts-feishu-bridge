@@ -126,6 +126,7 @@ export function loadConfig(env = process.env) {
     reactionFailureEmoji: env.REACTION_FAILURE || "CrossMark",
     replyFormat,
     progressCard: bool(env.BRIDGE_PROGRESS_CARD, true),
+    completionNotice: bool(env.BRIDGE_COMPLETION_NOTICE, true),
     replyChunkSize: int(env.REPLY_CHUNK_SIZE, 1800),
     replyMaxChunks: int(env.REPLY_MAX_CHUNKS, 4),
     ack: bool(env.BRIDGE_ACK, true),

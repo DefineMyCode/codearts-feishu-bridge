@@ -109,19 +109,39 @@ export function createMessageHandler({
 
   async function reply(messageId, text, { progressMessageId = "" } = {}) {
     const chunks = chunkText(text, config.replyChunkSize, config.replyMaxChunks);
+    let updatedProgress = false;
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = chunks[i];
       if (i === 0 && progressMessageId) {
         const updated = await lark.updateCard(progressMessageId, buildCardMarkdown(chunk));
-        if (updated?.code === 0) continue;
+        if (updated?.code === 0) {
+          updatedProgress = true;
+          continue;
+        }
         logger?.warn?.(
           "更新进度卡片失败，改为发送新消息",
           (updated?.stderr || updated?.error || "").slice(0, 200),
         );
       }
-      if (!(await sendOne(messageId, chunk))) return false;
+      if (!(await sendOne(messageId, chunk))) return { ok: false, updatedProgress };
     }
-    return true;
+    return { ok: true, updatedProgress };
+  }
+
+  async function maybeNotifyCompletion(message, { summary, result, updatedProgress }) {
+    if (config.completionNotice === false || !updatedProgress) return;
+    if (chunkText(summary, config.replyChunkSize, config.replyMaxChunks).length > 1) return;
+    let text = "任务已完成，结果见上方卡片。";
+    if (result.aborted) {
+      text = "任务已停止。";
+    } else if (result.error || result.spawnError || result.timedOut) {
+      text = "任务失败，详情见上方卡片。";
+    }
+    try {
+      await lark.replyText(message.messageId, text);
+    } catch (err) {
+      logger?.debug?.("完成提醒发送失败", err?.message || String(err));
+    }
   }
 
   function progressCardEnabled() {
@@ -352,8 +372,14 @@ export function createMessageHandler({
         } catch (err) {
           logger?.error("保存会话状态失败", err);
         }
+        const summary = summarizeResult(result);
         recordResult(taskId, result);
-        await reply(message.messageId, summarizeResult(result), { progressMessageId });
+        const replyResult = await reply(message.messageId, summary, { progressMessageId });
+        await maybeNotifyCompletion(message, {
+          summary,
+          result,
+          updatedProgress: replyResult.updatedProgress,
+        });
         if (result.error || result.spawnError) await markFailure(message);
       } catch (err) {
         if (store && taskId) store.markFailed(taskId, { error: err?.message || String(err) });
