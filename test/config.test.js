@@ -112,6 +112,7 @@ test("任务队列配置有默认值且可覆盖", () => {
   assert.equal(config.taskAutoRetry, true);
   assert.equal(config.taskMaxAttempts, 2);
   assert.equal(config.taskRetentionDays, 30);
+  assert.equal(config.timeoutMs, 1800000);
   assert.equal(loadConfig({ ...base, TASK_AUTO_RETRY: "false" }).taskAutoRetry, false);
   assert.equal(loadConfig({ ...base, TASK_MAX_ATTEMPTS: "3" }).taskMaxAttempts, 3);
 });

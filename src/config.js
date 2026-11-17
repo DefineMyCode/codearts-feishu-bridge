@@ -102,7 +102,7 @@ export function loadConfig(env = process.env) {
     model: env.CODEARTS_MODEL || "",
     agent: env.CODEARTS_AGENT || "",
     approvalMode,
-    timeoutMs: int(env.CODEARTS_TIMEOUT_MS, 600000),
+    timeoutMs: int(env.CODEARTS_TIMEOUT_MS, 1800000),
     maxConcurrency: int(env.CODEARTS_MAX_CONCURRENCY, 2),
     allowedChatIds: list(env.ALLOWED_CHAT_IDS),
     stateFile: path.resolve(env.STATE_FILE || "./data/sessions.json"),

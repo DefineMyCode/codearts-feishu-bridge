@@ -62,7 +62,7 @@ cp .env.example .env
 | `LARK_IDENTITY` | 否 | 身份类型，默认 `bot`；也可设 `user` 用你本人的身份收发 |
 | `BOT_NAME` | 建议 | 机器人在群里的显示名，用于判断群里是否 @ 了它；不填则“有提及就响应” |
 | `GROUP_REQUIRE_MENTION` | 否 | 默认 `true`，群聊必须 @ 机器人才响应 |
-| `CODEARTS_TIMEOUT_MS` | 否 | 单任务超时，默认 600000（10 分钟） |
+| `CODEARTS_TIMEOUT_MS` | 否 | 单任务超时，默认 1800000（30 分钟）；超时会把 stderr 尾部写入任务表 |
 | `CODEARTS_MAX_CONCURRENCY` | 否 | 全局同时执行的任务数，默认 2 |
 | `ALLOWED_CHAT_IDS` | 否 | 逗号分隔的会话白名单（`oc_` 开头），强烈建议在生产环境配置 |
 | `CODEARTS_MODEL` / `CODEARTS_AGENT` | 否 | 指定模型或智能体，留空用默认 |

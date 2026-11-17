@@ -300,25 +300,41 @@ export function createMessageHandler({
     });
   }
 
-  function recordResult(taskId, result, { userRequested = false } = {}) {
-    if (!store || !taskId) return;
+  function describeFailure(result, fallback) {
+    const tail = String(result.stderrTail || "").trim().slice(-1500);
+    return tail ? `${fallback}：${tail}` : fallback;
+  }
+
+  function recordResult(taskId, result, { userRequested = false, durationMs = 0 } = {}) {
+    const seconds = Math.max(0, Math.round(durationMs / 1000));
+    if (!store || !taskId) {
+      logger?.info?.(`任务结束 | 未入库 | 耗时 ${seconds}s`);
+      return;
+    }
     if (result.aborted) {
       if (userRequested) {
         store.markStopped(taskId, { reason: "用户主动停止" });
+        logger?.info?.(`任务结束 | ${taskId} | stopped | 耗时 ${seconds}s`);
       } else {
         store.markInterrupted(taskId, { error: "服务停止中断" });
+        logger?.info?.(`任务结束 | ${taskId} | interrupted | 耗时 ${seconds}s`);
       }
       return;
     }
     if (result.timedOut) {
-      store.markFailed(taskId, { error: "任务超时" });
+      const error = describeFailure(result, "任务超时");
+      store.markFailed(taskId, { error });
+      logger?.warn?.(`任务超时 | ${taskId} | 耗时 ${seconds}s | ${error.slice(-400)}`);
       return;
     }
     if (result.spawnError || result.error) {
-      store.markFailed(taskId, { error: result.spawnError || result.error });
+      const error = describeFailure(result, result.spawnError || result.error);
+      store.markFailed(taskId, { error });
+      logger?.warn?.(`任务失败 | ${taskId} | 耗时 ${seconds}s | ${error.slice(-400)}`);
       return;
     }
     store.markSucceeded(taskId, { summary: summarizeResult(result).slice(0, 4000) });
+    logger?.info?.(`任务结束 | ${taskId} | succeeded | 耗时 ${seconds}s`);
   }
 
   function startRun(message, { key: explicitKey, task = null } = {}) {
@@ -328,6 +344,7 @@ export function createMessageHandler({
     }
 
     const taskId = task ? task.id : createTaskRecord(message, key);
+    const startedAt = Date.now();
     const controller = new AbortController();
     running.set(key, controller);
 
@@ -336,6 +353,7 @@ export function createMessageHandler({
       let progressMessageId = task?.progressMessageId || "";
       try {
         if (store && taskId) store.markRunning(taskId);
+        logger?.info?.(`任务开始 | ${taskId || "未入库"} | ${key}`);
         if (progressCardEnabled()) {
           const sent = await lark.replyCard(
             message.messageId,
@@ -378,7 +396,10 @@ export function createMessageHandler({
           logger?.error("保存会话状态失败", err);
         }
         const summary = summarizeResult(result);
-        recordResult(taskId, result, { userRequested: controller.userRequested === true });
+        recordResult(taskId, result, {
+          userRequested: controller.userRequested === true,
+          durationMs: Date.now() - startedAt,
+        });
         const replyResult = await reply(message.messageId, summary, { progressMessageId });
         await maybeNotifyCompletion(message, {
           summary,

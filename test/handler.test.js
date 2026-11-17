@@ -714,3 +714,23 @@ test("任务失败时补发失败提醒", async () => {
   assert.equal(notices.length, 1);
   assert.match(notices[0].text, /任务失败/);
 });
+
+test("任务超时时把 stderr 尾部记录到任务表", async () => {
+  const store = makeStore();
+  const { handle } = makeHarness({
+    store,
+    runCodearts: async () => ({
+      timedOut: true,
+      stderrTail: "模型请求超时：connect ETIMEDOUT",
+      text: "",
+    }),
+  });
+
+  await (await handle(event({ message_id: "om_timeout" }))).run;
+
+  const tasks = store.listByStatus("failed");
+  assert.equal(tasks.length, 1);
+  assert.match(tasks[0].error, /任务超时/);
+  assert.match(tasks[0].error, /ETIMEDOUT/);
+  store.close();
+});
