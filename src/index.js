@@ -12,6 +12,7 @@ import { cleanMediaDir } from "./media.js";
 import { TaskStore } from "./taskstore.js";
 import { recoverTasks } from "./recovery.js";
 import { buildProgressCard } from "./card.js";
+import { createScheduler } from "./scheduler.js";
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel });
@@ -117,6 +118,18 @@ const taskRetentionMs =
 const removedTasks = store.cleanupTasks({ retentionMs: taskRetentionMs });
 if (removedTasks > 0) logger.info(`已清理 ${removedTasks} 个过期任务记录`);
 
+const scheduler = createScheduler({
+  tasks: config.cronTasks,
+  config,
+  queue,
+  lark,
+  runCodearts,
+  logger,
+});
+if (scheduler.running) {
+  logger.info(`定时任务已启用 | ${config.cronTasks.length} 条`);
+}
+
 const consumer = lark.startConsuming({
   onEvent: (event) => {
     handle(event).catch((err) => logger.error("消息处理失败", err));
@@ -171,6 +184,7 @@ async function shutdown(signal) {
   logger.info(`收到 ${signal}，正在退出`);
   consumer.stop();
   cardConsumer.stop();
+  scheduler.stop();
   clearInterval(mediaTimer);
   batcher.stop();
   try {

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { parseCronTasks } from "./scheduler.js";
 
 function int(value, fallback) {
   const n = Number.parseInt(value ?? "", 10);
@@ -129,6 +130,10 @@ export function loadConfig(env = process.env) {
     completionNotice: bool(env.BRIDGE_COMPLETION_NOTICE, true),
     replyChunkSize: int(env.REPLY_CHUNK_SIZE, 1800),
     replyMaxChunks: int(env.REPLY_MAX_CHUNKS, 4),
+    heartbeatMinutes: nonNegativeInt(env.BRIDGE_HEARTBEAT_MINUTES, 5),
+    attachLongOutput: bool(env.BRIDGE_ATTACH_LONG_OUTPUT, true),
+    outputDir: path.resolve(env.BRIDGE_OUTPUT_DIR || "./data/output"),
+    cronTasks: parseCronTasks(env.CRON_TASKS || ""),
     ack: bool(env.BRIDGE_ACK, true),
     logLevel: (env.LOG_LEVEL || "info").toUpperCase(),
   };

@@ -7,7 +7,8 @@ import {
   Deduper,
 } from "./message.js";
 import { buildSessionKey } from "./sessions.js";
-import { chunkText } from "./text.js";
+import { chunkText, splitText } from "./text.js";
+import { saveOutput } from "./output.js";
 import { summarizeResult } from "./codearts.js";
 import { buildCardMarkdown, buildProgressCard } from "./card.js";
 import { extractMessageId } from "./larkcli.js";
@@ -107,8 +108,8 @@ export function createMessageHandler({
     return false;
   }
 
-  async function reply(messageId, text, { progressMessageId = "" } = {}) {
-    const chunks = chunkText(text, config.replyChunkSize, config.replyMaxChunks);
+  async function reply(messageId, text, { progressMessageId = "", chatId = "" } = {}) {
+    const { chunks, truncated } = splitText(text, config.replyChunkSize, config.replyMaxChunks);
     let updatedProgress = false;
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = chunks[i];
@@ -125,6 +126,19 @@ export function createMessageHandler({
       }
       if (!(await sendOne(messageId, chunk))) return { ok: false, updatedProgress };
     }
+
+    if (truncated && config.attachLongOutput && chatId) {
+      try {
+        const saved = saveOutput({ dir: config.outputDir, key: chatId, text });
+        const sent = await lark.sendFile(chatId, saved.name, { cwd: config.outputDir });
+        if (sent?.code !== 0) {
+          await lark.sendText(chatId, `完整输出已保存到服务器：${saved.path}`);
+        }
+      } catch (err) {
+        logger?.warn?.("保存或上传长输出失败", err?.message || String(err));
+      }
+    }
+
     return { ok: true, updatedProgress };
   }
 
@@ -351,6 +365,7 @@ export function createMessageHandler({
     const run = queue.push(key, async () => {
       const reactionId = await markProcessing(message);
       let progressMessageId = task?.progressMessageId || "";
+      let heartbeatTimer = null;
       try {
         if (store && taskId) store.markRunning(taskId);
         logger?.info?.(`任务开始 | ${taskId || "未入库"} | ${key}`);
@@ -374,6 +389,28 @@ export function createMessageHandler({
         if (!progressMessageId && config.ack) {
           await reply(message.messageId, "已收到，开始执行…（发送 /stop 可终止）");
         }
+        const heartbeatMs = Math.max(0, (config.heartbeatMinutes || 0) * 60000);
+        if (heartbeatMs > 0 && progressMessageId) {
+          heartbeatTimer = setInterval(() => {
+            if (typeof lark.isFlooded === "function" && lark.isFlooded()) return;
+            const minutes = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+            const limit = Math.max(1, Math.round((config.timeoutMs || 0) / 60000));
+            lark
+              .updateCard(
+                progressMessageId,
+                buildProgressCard({
+                  title: "任务执行中",
+                  text: `⏳ 仍在执行…已用时 ${minutes} 分钟（上限 ${limit} 分钟）`,
+                  actions: [
+                    { text: "停止任务", type: "danger", value: { cmd: "/stop", key } },
+                  ],
+                }),
+              )
+              .catch(() => {});
+          }, heartbeatMs);
+          heartbeatTimer.unref?.();
+        }
+
         const prompt = task && task.attempts > 0 ? task.prompt : await buildPrompt(message);
         if (store && taskId) store.updatePrompt(taskId, prompt);
         const result = await runCodearts({
@@ -400,7 +437,10 @@ export function createMessageHandler({
           userRequested: controller.userRequested === true,
           durationMs: Date.now() - startedAt,
         });
-        const replyResult = await reply(message.messageId, summary, { progressMessageId });
+        const replyResult = await reply(message.messageId, summary, {
+          progressMessageId,
+          chatId: message.chatId,
+        });
         await maybeNotifyCompletion(message, {
           summary,
           result,
@@ -412,6 +452,7 @@ export function createMessageHandler({
         await markFailure(message);
         throw err;
       } finally {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
         await clearProcessing(message, reactionId);
         running.delete(key);
       }

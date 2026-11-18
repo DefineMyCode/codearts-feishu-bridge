@@ -155,9 +155,11 @@ function splitLongParagraph(paragraph, size) {
   return pieces;
 }
 
-export function chunkText(text, size, maxChunks) {
+export function splitText(text, size, maxChunks) {
   const normalized = String(text ?? "").replace(/\r\n/g, "\n").trim();
-  if (!normalized) return ["（码道没有返回内容）"];
+  if (!normalized) {
+    return { chunks: ["（码道没有返回内容）"], truncated: false, totalLength: 0 };
+  }
 
   const blocks = splitBlocks(normalized);
   const chunks = [];
@@ -193,12 +195,19 @@ export function chunkText(text, size, maxChunks) {
   }
   flushCurrent();
 
-  if (chunks.length <= maxChunks) return chunks;
+  const totalLength = normalized.length;
+  if (chunks.length <= maxChunks) {
+    return { chunks, truncated: false, totalLength };
+  }
 
   const kept = chunks.slice(0, maxChunks);
   const restLength = chunks.slice(maxChunks).join("\n\n").length;
   const note = `\n\n…（内容过长，已截断，剩余 ${restLength} 字符）`;
   const last = kept[kept.length - 1];
   kept[kept.length - 1] = last.slice(0, Math.max(0, size - note.length)) + note;
-  return kept;
+  return { chunks: kept, truncated: true, totalLength };
+}
+
+export function chunkText(text, size, maxChunks) {
+  return splitText(text, size, maxChunks).chunks;
 }

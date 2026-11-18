@@ -6,7 +6,10 @@ import {
   buildReplyArgs,
   buildReplyCardArgs,
   buildSendArgs,
+  buildSendFileArgs,
+  buildSendMarkdownArgs,
   createNdjsonDecoder,
+  parseFloodWait,
   LarkCli,
 } from "../src/larkcli.js";
 
@@ -264,4 +267,37 @@ test("回调未订阅时停止重连并只提示一次", async () => {
   assert.equal(spawnCount, 1);
   assert.ok(errors.some((m) => /停止重连/.test(m)));
   handle.stop();
+});
+
+test("parseFloodWait 解析限流等待时间", () => {
+  assert.equal(parseFloodWait("retry after 12"), 12);
+  assert.equal(parseFloodWait("HTTP 429 too many requests"), 30);
+  assert.equal(parseFloodWait("普通错误"), 0);
+  assert.equal(parseFloodWait(""), 0);
+});
+
+test("sendFile 与 sendMarkdown 使用对应参数", async () => {
+  const calls = [];
+  const lark = new LarkCli({
+    spawnImpl: (bin, args) => {
+      calls.push(args);
+      return fakeChild({ code: 0, stdout: "{}" });
+    },
+  });
+  await lark.sendFile("oc_1", "out.md", { cwd: "/tmp" });
+  await lark.sendMarkdown("oc_1", "**hi**");
+
+  assert.deepEqual(calls[0], buildSendFileArgs({ chatId: "oc_1", file: "out.md" }));
+  assert.deepEqual(calls[1], buildSendMarkdownArgs({ chatId: "oc_1", text: "**hi**" }));
+});
+
+test("遇到 429 时进入洪泛窗口", async () => {
+  const lark = new LarkCli({
+    logger: { warn: () => {}, error: () => {}, debug: () => {} },
+    spawnImpl: () => fakeChild({ code: 1, stderr: "429 rate limit retry after 5" }),
+  });
+  await lark.sendText("oc_1", "hi");
+
+  assert.equal(lark.isFlooded(), true);
+  assert.ok(lark.floodWaitMs() > 3000);
 });

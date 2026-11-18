@@ -19,6 +19,9 @@ function makeConfig(overrides = {}) {
     replyFormat: "card",
     replyChunkSize: 1800,
     replyMaxChunks: 4,
+    heartbeatMinutes: 0,
+    attachLongOutput: true,
+    outputDir: path.join(os.tmpdir(), "handler-output"),
     ack: true,
     allowedChatIds: [],
     allowedUserIds: [],
@@ -37,6 +40,8 @@ function makeConfig(overrides = {}) {
 function makeLark() {
   const replies = [];
   const reactions = [];
+  const files = [];
+  const texts = [];
   const lark = {
     replyCard: async (messageId, card) => {
       const parsed = JSON.parse(card);
@@ -64,12 +69,20 @@ function makeLark() {
       reactions.push({ action: "remove", messageId, reactionId });
       return true;
     },
+    sendFile: async (chatId, file) => {
+      files.push({ chatId, file });
+      return { code: 0 };
+    },
+    sendText: async (chatId, text) => {
+      texts.push({ chatId, text });
+      return { code: 0 };
+    },
   };
-  return { lark, replies, reactions };
+  return { lark, replies, reactions, files, texts };
 }
 
 function makeHarness({ config = makeConfig(), runCodearts, batcher, store } = {}) {
-  const { lark, replies, reactions } = makeLark();
+  const { lark, replies, reactions, files, texts } = makeLark();
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "handler-")), "sessions.json");
   const sessions = new SessionStore(file).load();
   const queue = new TaskQueue({ maxConcurrency: 2 });
@@ -85,7 +98,7 @@ function makeHarness({ config = makeConfig(), runCodearts, batcher, store } = {}
     batcher,
     store,
   });
-  return { handle, replies, reactions, sessions, queue, errors, store };
+  return { handle, replies, reactions, sessions, queue, errors, store, files, texts };
 }
 
 function event(overrides = {}) {
@@ -733,4 +746,25 @@ test("任务超时时把 stderr 尾部记录到任务表", async () => {
   assert.match(tasks[0].error, /任务超时/);
   assert.match(tasks[0].error, /ETIMEDOUT/);
   store.close();
+});
+
+test("超长结果落盘并作为附件发回飞书", async () => {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "handler-out-"));
+  const longText = Array.from({ length: 40 }, (_, i) => `第 ${i} 段内容`).join("\n\n");
+  const { handle, files } = makeHarness({
+    config: makeConfig({
+      replyMaxChunks: 1,
+      replyChunkSize: 60,
+      attachLongOutput: true,
+      outputDir,
+    }),
+    runCodearts: async () => ({ text: longText, sessionID: "ses_long", exitCode: 0 }),
+  });
+
+  await (await handle(event())).run;
+
+  assert.equal(files.length, 1);
+  assert.equal(files[0].chatId, "oc_1");
+  assert.match(files[0].file, /\.md$/);
+  assert.ok(fs.existsSync(path.join(outputDir, files[0].file)));
 });

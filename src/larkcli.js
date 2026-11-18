@@ -56,6 +56,28 @@ export function buildReactionDeleteArgs({ messageId, reactionId, identity = "bot
   ];
 }
 
+export function buildSendFileArgs({ chatId, file, identity = "bot" }) {
+  return ["im", "+messages-send", "--chat-id", chatId, "--file", file, "--as", identity];
+}
+
+export function buildSendMarkdownArgs({ chatId, text, identity = "bot" }) {
+  return ["im", "+messages-send", "--chat-id", chatId, "--markdown", text, "--as", identity];
+}
+
+export function parseFloodWait(text) {
+  const raw = String(text ?? "");
+  if (!raw) return 0;
+  const retry =
+    raw.match(/retry[_\s-]?after["'\s:=]*([\d.]+)/i) ||
+    raw.match(/([\d.]+)\s*秒(?:后|之后)/);
+  if (retry) {
+    const seconds = Number.parseFloat(retry[1]);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 30;
+  }
+  if (/429|rate.?limit|flood|too many requests|频率超限|触发限流/i.test(raw)) return 30;
+  return 0;
+}
+
 export function extractMessageId(result) {
   if (!result || result.code !== 0) return "";
   try {
@@ -117,6 +139,15 @@ export class LarkCli {
     this.consumer = null;
     this.stopped = false;
     this.restartDelay = 1000;
+    this.floodUntil = 0;
+  }
+
+  isFlooded() {
+    return Date.now() < this.floodUntil;
+  }
+
+  floodWaitMs() {
+    return Math.max(0, this.floodUntil - Date.now());
   }
 
   async call(args, { timeoutMs = 120000, cwd } = {}) {
@@ -144,6 +175,13 @@ export class LarkCli {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (code !== 0) {
+          const wait = parseFloodWait(`${stdout}\n${stderr}\n${error ?? ""}`);
+          if (wait > 0) {
+            this.floodUntil = Date.now() + wait * 1000;
+            this.logger?.warn?.(`飞书限流，${wait}s 内跳过非关键发送`);
+          }
+        }
         resolve({ code, stdout, stderr, error });
       };
       child.on("error", (err) => done(null, err.message));
@@ -180,6 +218,17 @@ export class LarkCli {
 
   async sendText(chatId, text) {
     return this.call(buildSendArgs({ chatId, text, identity: this.identity }));
+  }
+
+  async sendMarkdown(chatId, text) {
+    return this.call(buildSendMarkdownArgs({ chatId, text, identity: this.identity }));
+  }
+
+  async sendFile(chatId, file, { cwd } = {}) {
+    return this.call(buildSendFileArgs({ chatId, file, identity: this.identity }), {
+      cwd,
+      timeoutMs: 180000,
+    });
   }
 
   async updateCard(messageId, card) {

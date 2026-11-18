@@ -69,6 +69,10 @@ cp .env.example .env
 | `CODEARTS_APPROVAL_MODE` | 否 | 审批模式：`auto`（默认，沙箱 + AI 自动审批）、`manual`（沙箱 + 人工审批，IM 场景会一直等待）、`full`（跳过沙箱与全部检查）；也接受 `auto_approval`/`manual_approval`/`full_access` |
 | `REPLY_FORMAT` | 否 | 回复格式：`card`（默认，interactive 卡片，标题/表格/代码块结构化渲染）、`post`（飞书富文本 markdown）、`text`（纯文本）；发送失败会自动降级 |
 | `REPLY_CHUNK_SIZE` / `REPLY_MAX_CHUNKS` | 否 | 长结果分段大小与段数，默认 1800 / 4 |
+| `BRIDGE_HEARTBEAT_MINUTES` | 否 | 长任务执行中每 N 分钟更新进度卡片显示已用时，默认 5；`0` 关闭 |
+| `BRIDGE_ATTACH_LONG_OUTPUT` | 否 | 结果被截断时把完整内容落盘并作为文件附件发回，默认 `true` |
+| `BRIDGE_OUTPUT_DIR` | 否 | 长输出落盘目录，默认 `./data/output` |
+| `CRON_TASKS` | 否 | 定时任务，每条 `cron|提示词|chat_id`，多条用 `;` 分隔，例如 `0 9 * * *|总结昨天提交|oc_x` |
 | `BRIDGE_ACK` | 否 | 是否先回“已收到，开始执行…”，默认 true |
 | `STATE_FILE` | 否 | 会话映射持久化位置，默认 `./data/sessions.json` |
 | `GROUP_SESSIONS_PER_USER` | 否 | 群内是否按发言人隔离上下文，默认 `true`；设为 `false` 则全群共享 |
@@ -208,7 +212,10 @@ npm test                 # 单元测试
 - 支持文本、富文本、图片、文件、音频、视频；富文本里内嵌的文件会回查原始消息体解析后下载。
 - 附件下载到 `MEDIA_DIR`，默认保留 7 天，启动时与每天各清理一次；只清理该目录下的文件，不递归子目录。
 - 回复默认走 `interactive` 卡片，由桥接把 Markdown 转成结构化元素：首个标题转为卡片 `header`，表格逐行转为 `column_set`（表头加粗、去掉 `|---|` 分隔行），代码块与分割线原样保留；发送失败按 `card → post → text` 自动降级。
-- 长回复按块分段（代码块、表格、标题、列表、段落各自成块，表格与代码块不会被空行拆散），超出 `REPLY_CHUNK_SIZE` 才按行切分；每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段，没有卡片流式更新。
+- 长回复按块分段（代码块、表格、标题、列表、段落各自成块，表格与代码块不会被空行拆散），超出 `REPLY_CHUNK_SIZE` 才按行切分；每段一张卡片，最多 `REPLY_MAX_CHUNKS` 段。
+- 执行中每 `BRIDGE_HEARTBEAT_MINUTES`（默认 5）分钟更新一次进度卡片显示已用时与超时上限，属于整卡刷新，不是 token 级流式。
+- 结果超出分段上限且 `BRIDGE_ATTACH_LONG_OUTPUT=true` 时，完整内容落盘到 `BRIDGE_OUTPUT_DIR` 并作为**文件附件**发回飞书；上传失败则回一条服务器路径提示。
+- `CRON_TASKS` 支持定时任务：服务每分钟检查一次，命中后以独立会话执行并投递结果；不受会话串行锁影响，也不占用用户上下文。
 - `REPLY_FORMAT=post` 走 `lark-cli --markdown`（飞书 post 富文本），代码块与表格支持有限；`REPLY_FORMAT=text` 为纯文本。
 - 会话、去重与任务记录统一存在 `TASK_DB` 指向的 SQLite 里，仍只支持单实例，不支持多进程共享。
 - 重启时残留的 running 任务会被标记为中断，并按 `TASK_AUTO_RETRY` 与 `TASK_MAX_ATTEMPTS`（默认最多两次尝试）自动重投；重投是整轮重跑，不是断点续跑。

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chunkText } from "../src/text.js";
+import { chunkText, splitText } from "../src/text.js";
 
 test("空内容返回占位提示", () => {
   assert.deepEqual(chunkText("", 100, 3), ["（码道没有返回内容）"]);
@@ -100,4 +100,17 @@ test("列表块不被拆到标题所在分段之外", () => {
   assert.equal(chunks.length, 1);
   assert.match(chunks[0], /- 第一项/);
   assert.match(chunks[0], /- 第三项/);
+});
+
+test("splitText 报告截断状态与总长度", () => {
+  const long = Array.from({ length: 50 }, (_, i) => `段落-${i}`).join("\n\n");
+  const result = splitText(long, 20, 2);
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.chunks.length, 2);
+  assert.equal(result.totalLength, long.length);
+
+  const short = splitText("hi", 20, 2);
+  assert.equal(short.truncated, false);
+  assert.equal(short.totalLength, 2);
 });
